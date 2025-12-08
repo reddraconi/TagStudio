@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
 )
+from tagstudio.qt.mixed.paste_tags_dialog import PasteTagsDialog
 
 import tagstudio.qt.resources_rc  # noqa: F401
 from tagstudio.core.constants import TAG_ARCHIVED, TAG_FAVORITE, VERSION, VERSION_BRANCH
@@ -217,6 +218,9 @@ class QtDriver(DriverMixin, QObject):
         # self.buffer = {}
         self.thumb_job_queue: Queue = Queue()
         self.thumb_threads: list[Consumer] = []
+
+        self.tags_clipboard: set[int] = set()
+        self.tags_clipboard_source: set[int] = set()
 
         self.SIGTERM.connect(self.handle_sigterm)
 
@@ -446,6 +450,14 @@ class QtDriver(DriverMixin, QObject):
 
         self.main_window.menu_bar.paste_fields_action.triggered.connect(
             self.paste_fields_action_callback
+        )
+
+        self.main_window.menu_bar.copy_tags_action.triggered.connect(
+            self.copy_tags_action_callback
+        )
+
+        self.main_window.menu_bar.paste_tags_action.triggered.connect(
+            self.paste_tags_action_callback
         )
 
         self.main_window.menu_bar.add_tag_to_selected_action.triggered.connect(
@@ -737,6 +749,8 @@ class QtDriver(DriverMixin, QObject):
         self.cached_values.sync()
 
         # Reset library state
+        self.tags_clipboard.clear()
+        self.tags_clipboard_source.clear()
         self.main_window.preview_panel.set_selection(self.selected)
         self.main_window.search_field.setText("")
         scrollbar: QScrollArea = self.main_window.entry_scroll_area
@@ -852,6 +866,8 @@ class QtDriver(DriverMixin, QObject):
 
         self.set_clipboard_menu_viability()
         self.set_select_actions_visibility()
+        self.set_tags_clipboard_menu_viability()
+        self.update_paste_tags_context_menu_visibility()
 
         self.main_window.preview_panel.set_selection(self.selected, update_preview=False)
 
@@ -861,6 +877,8 @@ class QtDriver(DriverMixin, QObject):
 
         self.set_clipboard_menu_viability()
         self.set_select_actions_visibility()
+        self.set_tags_clipboard_menu_viability()
+        self.update_paste_tags_context_menu_visibility()
 
         self.main_window.preview_panel.set_selection(self.selected, update_preview=False)
 
@@ -869,6 +887,8 @@ class QtDriver(DriverMixin, QObject):
 
         self.set_select_actions_visibility()
         self.set_clipboard_menu_viability()
+        self.set_tags_clipboard_menu_viability()
+        self.update_paste_tags_context_menu_visibility()
         self.main_window.preview_panel.set_selection(self.selected)
 
     def add_tags_to_selected_callback(self, tag_ids: list[int]):
@@ -1278,6 +1298,8 @@ class QtDriver(DriverMixin, QObject):
 
         self.set_clipboard_menu_viability()
         self.set_select_actions_visibility()
+        self.set_tags_clipboard_menu_viability()
+        self.update_paste_tags_context_menu_visibility()
 
         self.main_window.preview_panel.set_selection(self.selected)
 
@@ -1310,6 +1332,113 @@ class QtDriver(DriverMixin, QObject):
             self.main_window.menu_bar.add_tag_to_selected_action.setEnabled(False)
             self.main_window.menu_bar.clear_select_action.setEnabled(False)
             self.main_window.menu_bar.delete_file_action.setEnabled(False)
+
+    def set_tags_clipboard_menu_viability(self):
+        if len(self.selected) >= 1:
+            self.main_window.menu_bar.copy_tags_action.setEnabled(True)
+        else:
+            self.main_window.menu_bar.copy_tags_action.setEnabled(False)
+        if self.selected and self.tags_clipboard:
+            self.main_window.menu_bar.paste_tags_action.setEnabled(True)
+        else:
+            self.main_window.menu_bar.paste_tags_action.setEnabled(False)
+
+    def update_paste_tags_context_menu_visibility(self):
+        for item_thumb in self.main_window.thumb_layout._item_thumbs:
+            if item_thumb.item_id in self.selected and self.tags_clipboard:
+                item_thumb.paste_tags_action_menu.setVisible(True)
+            else:
+                item_thumb.paste_tags_action_menu.setVisible(False)
+
+    def copy_tags_action_callback(self):
+        if len(self.selected) == 0:
+            return
+
+        # Collect all tags from all selected entries
+        all_tags: set[int] = set()
+        for entry_id in self.selected:
+            entry = self.lib.get_entry_full(entry_id)
+            if entry:
+                all_tags.update(tag.id for tag in entry.tags)
+
+        self.tags_clipboard = all_tags
+        self.tags_clipboard_source = set(self.selected)
+        self.set_tags_clipboard_menu_viability()
+        self.update_paste_tags_context_menu_visibility()
+
+        logger.info(
+            "[copy_tags_action_callback] Copied tags to clipboard",
+            tag_ids=self.tags_clipboard,
+            from_entries=self.tags_clipboard_source,
+        )
+
+    def paste_tags_action_callback(self):
+        if not self.tags_clipboard or not self.selected:
+            return
+
+        self._execute_paste_tags()
+
+    def _execute_paste_tags(self, paste_options: set[str] | None = None):
+        if not self.tags_clipboard or not self.selected:
+            return
+
+        if paste_options is None:
+            # Show dialog to get paste options
+            dialog = PasteTagsDialog(
+                source_entry_ids=self.tags_clipboard_source,
+                target_entry_ids=set(self.selected),
+                tag_ids=self.tags_clipboard,
+                library=self.lib,
+            )
+            if not dialog.exec():
+                return
+            paste_options = dialog.get_selected_options()
+
+        logger.info(
+            "[_execute_paste_tags] Pasting tags",
+            tag_ids=self.tags_clipboard,
+            to_entries=self.selected,
+            options=paste_options,
+        )
+
+        # Apply paste options
+        mode = "add"
+        if "replace" in paste_options:
+            mode = "replace"
+        elif "merge" in paste_options:
+            mode = "merge"
+
+        for entry_id in self.selected:
+            entry = self.lib.get_entry_full(entry_id)
+            if not entry:
+                continue
+
+            current_tag_ids = {tag.id for tag in entry.tags}
+
+            if mode == "replace":
+                # Remove all current tags, then add clipboard tags
+                if current_tag_ids:
+                    self.lib.remove_tags_from_entries([entry_id], list(current_tag_ids))
+                self.lib.add_tags_to_entries([entry_id], list(self.tags_clipboard))
+            elif mode == "merge":
+                # Add only tags that don't exist
+                tags_to_add = self.tags_clipboard - current_tag_ids
+                if tags_to_add:
+                    self.lib.add_tags_to_entries([entry_id], list(tags_to_add))
+            else:  # mode == "add" (default)
+                # Add clipboard tags (library handles duplicates)
+                self.lib.add_tags_to_entries([entry_id], list(self.tags_clipboard))
+
+        # Update UI
+        if len(self.selected) > 1:
+            if TAG_ARCHIVED in self.tags_clipboard:
+                self.update_badges({BadgeType.ARCHIVED: True}, origin_id=0, add_tags=False)
+            if TAG_FAVORITE in self.tags_clipboard:
+                self.update_badges({BadgeType.FAVORITE: True}, origin_id=0, add_tags=False)
+        else:
+            self.main_window.preview_panel.set_selection(self.selected)
+
+        self.main_window.thumb_layout.add_tags(self.selected, list(self.tags_clipboard))
 
     def update_completions_list(self, text: str) -> None:
         matches = re.search(

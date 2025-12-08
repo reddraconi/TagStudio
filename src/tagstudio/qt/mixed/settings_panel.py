@@ -65,6 +65,12 @@ class SettingsPanel(PanelWidget):
         TagClickActionOption.ADD_TO_SEARCH: Translations["settings.tag_click_action.add_to_search"],
     }
 
+    paste_tags_mode_map: dict[str, str] = {
+        "ask": "Ask each time",
+        "merge": "Merge - Add to existing tags",
+        "replace": "Replace - Remove existing tags",
+    }
+
     date_format_map: dict[str, str] = {
         "%d/%m/%y": "21/08/24",
         "%d/%m/%Y": "21/08/2024",
@@ -230,6 +236,18 @@ class SettingsPanel(PanelWidget):
             Translations["settings.tag_click_action.label"], self.tag_click_action_combobox
         )
 
+        # Paste Tags Mode
+        self.paste_tags_mode_combobox = QComboBox()
+        for k in SettingsPanel.paste_tags_mode_map:
+            self.paste_tags_mode_combobox.addItem(SettingsPanel.paste_tags_mode_map[k], k)
+        paste_tags_mode = self.driver.settings.paste_tags_mode
+        if paste_tags_mode not in SettingsPanel.paste_tags_mode_map:
+            paste_tags_mode = "ask"
+        self.paste_tags_mode_combobox.setCurrentIndex(
+            list(SettingsPanel.paste_tags_mode_map.keys()).index(paste_tags_mode)
+        )
+        form_layout.addRow("Paste Tags Mode:", self.paste_tags_mode_combobox)
+
         # Dark Mode
         self.theme_combobox = QComboBox()
         for k in SettingsPanel.theme_map:
@@ -301,6 +319,7 @@ class SettingsPanel(PanelWidget):
             "show_filepath": self.filepath_combobox.currentData(),
             "theme": self.theme_combobox.currentData(),
             "tag_click_action": self.tag_click_action_combobox.currentData(),
+            "paste_tags_mode": self.paste_tags_mode_combobox.currentData(),
             "date_format": self.dateformat_combobox.currentData(),
             "hour_format": self.hourformat_checkbox.isChecked(),
             "zero_padding": self.zeropadding_checkbox.isChecked(),
@@ -321,6 +340,7 @@ class SettingsPanel(PanelWidget):
         driver.settings.show_filepath = settings["show_filepath"]
         driver.settings.theme = settings["theme"]
         driver.settings.tag_click_action = settings["tag_click_action"]
+        driver.settings.paste_tags_mode = settings["paste_tags_mode"]
         driver.settings.date_format = settings["date_format"]
         driver.settings.hour_format = settings["hour_format"]
         driver.settings.zero_padding = settings["zero_padding"]

@@ -219,6 +219,18 @@ class ItemThumb(FlowWidget):
         self.thumb_button.addAction(open_explorer_action)
         self.thumb_button.addAction(self.delete_action)
 
+        copy_tags_action = QAction(Translations["edit.copy_tags"], self)
+        copy_tags_action.triggered.connect(lambda: self.driver.copy_tags_action_callback())
+        self.thumb_button.addAction(copy_tags_action)
+
+        self.paste_tags_action_menu = QAction(Translations["edit.paste_tags"], self)
+        self.paste_tags_action_menu.triggered.connect(lambda: self.driver.paste_tags_action_callback())
+        self.paste_tags_action_menu.setVisible(False)
+        self.thumb_button.addAction(self.paste_tags_action_menu)
+
+        # Install event filter for right-click selection
+        self.thumb_button.installEventFilter(self)
+
         # Static Badges ========================================================
 
         # Item Type Badge ------------------------------------------------------
@@ -527,3 +539,10 @@ class ItemThumb(FlowWidget):
         drag.setMimeData(mimedata)
         drag.exec(Qt.DropAction.CopyAction)
         logger.info("[ItemThumb] Dragging Files:", entry_ids=selected_ids)
+
+    def eventFilter(self, obj, event):
+        """Handle right-click to auto-select the item."""
+        if obj == self.thumb_button and event.type() == QEvent.Type.ContextMenu:
+            if not self.thumb_button.is_selected:
+                self.driver.toggle_item_selection(self.item_id, False, False)
+        return super().eventFilter(obj, event)

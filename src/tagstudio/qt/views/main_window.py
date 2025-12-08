@@ -250,6 +250,36 @@ class MainMenuBar(QMenuBar):
         self.paste_fields_action.setEnabled(False)
         self.edit_menu.addAction(self.paste_fields_action)
 
+        # Copy Tags
+        self.copy_tags_action = QAction(Translations["edit.copy_tags"], self)
+        self.copy_tags_action.setShortcut(
+            QtCore.QKeyCombination(
+                QtCore.Qt.KeyboardModifier(
+                    QtCore.Qt.KeyboardModifier.ControlModifier
+                    | QtCore.Qt.KeyboardModifier.ShiftModifier
+                ),
+                QtCore.Qt.Key.Key_C,
+            )
+        )
+        self.copy_tags_action.setToolTip("Ctrl+Shift+C")
+        self.copy_tags_action.setEnabled(False)
+        self.edit_menu.addAction(self.copy_tags_action)
+
+        # Paste Tags
+        self.paste_tags_action = QAction(Translations["edit.paste_tags"], self)
+        self.paste_tags_action.setShortcut(
+            QtCore.QKeyCombination(
+                QtCore.Qt.KeyboardModifier(
+                    QtCore.Qt.KeyboardModifier.ControlModifier
+                    | QtCore.Qt.KeyboardModifier.ShiftModifier
+                ),
+                QtCore.Qt.Key.Key_V,
+            )
+        )
+        self.paste_tags_action.setToolTip("Ctrl+Shift+V")
+        self.paste_tags_action.setEnabled(False)
+        self.edit_menu.addAction(self.paste_tags_action)
+
         # Add Tag to Selected
         self.add_tag_to_selected_action = QAction(Translations["select.add_tag_to_selected"], self)
         self.add_tag_to_selected_action.setShortcut(
