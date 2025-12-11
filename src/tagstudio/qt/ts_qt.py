@@ -452,9 +452,7 @@ class QtDriver(DriverMixin, QObject):
             self.paste_fields_action_callback
         )
 
-        self.main_window.menu_bar.copy_tags_action.triggered.connect(
-            self.copy_tags_action_callback
-        )
+        self.main_window.menu_bar.copy_tags_action.triggered.connect(self.copy_tags_action_callback)
 
         self.main_window.menu_bar.paste_tags_action.triggered.connect(
             self.paste_tags_action_callback
@@ -1047,16 +1045,18 @@ class QtDriver(DriverMixin, QObject):
         pw.show()
 
         iterator = FunctionIterator(
-            lambda lib=unwrap(self.lib.library_dir): tracker.refresh_dir(lib)  # noqa: B008
-        )
+            lambda lib=unwrap(self.lib.library_dir): tracker.refresh_dir(lib)
+        )  # noqa: B008
         iterator.value.connect(
             lambda x: (
                 pw.update_progress(x + 1),
                 pw.update_label(
                     Translations.format(
-                        "library.refresh.scanning.plural"
-                        if x + 1 != 1
-                        else "library.refresh.scanning.singular",
+                        (
+                            "library.refresh.scanning.plural"
+                            if x + 1 != 1
+                            else "library.refresh.scanning.singular"
+                        ),
                         searched_count=f"{x + 1:n}",
                         found_count=f"{tracker.files_count:n}",
                     )

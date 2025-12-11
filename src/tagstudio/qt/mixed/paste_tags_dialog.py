@@ -153,9 +153,7 @@ class PasteTagsDialog(QWidget):
         current_tag_ids = {tag.id for tag in entry.tags}
 
         tags_to_add = self.tags_clipboard - current_tag_ids
-        tags_to_remove = (
-            current_tag_ids - self.tags_clipboard if mode == "replace" else set()
-        )
+        tags_to_remove = current_tag_ids - self.tags_clipboard if mode == "replace" else set()
 
         if tags_to_add:
             add_container = QWidget()

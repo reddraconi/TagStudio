@@ -224,7 +224,9 @@ class ItemThumb(FlowWidget):
         self.thumb_button.addAction(copy_tags_action)
 
         self.paste_tags_action_menu = QAction(Translations["edit.paste_tags"], self)
-        self.paste_tags_action_menu.triggered.connect(lambda: self.driver.paste_tags_action_callback())
+        self.paste_tags_action_menu.triggered.connect(
+            lambda: self.driver.paste_tags_action_callback()
+        )
         self.paste_tags_action_menu.setVisible(False)
         self.thumb_button.addAction(self.paste_tags_action_menu)
 

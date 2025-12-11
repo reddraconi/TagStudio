@@ -570,7 +570,9 @@ class MainWindow(QMainWindow):
         self.search_bar_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
         self.back_button = QPushButton(self.central_widget)
-        back_icon: Image.Image = self.rm.get("bxs-left-arrow")  # pyright: ignore[reportAssignmentType]
+        back_icon: Image.Image = self.rm.get(
+            "bxs-left-arrow"
+        )  # pyright: ignore[reportAssignmentType]
         back_icon = theme_fg_overlay(back_icon, use_alpha=False)
         self.back_button.setIcon(QPixmap.fromImage(ImageQt.ImageQt(back_icon)))
         self.back_button.setObjectName("back_button")
@@ -579,7 +581,9 @@ class MainWindow(QMainWindow):
         self.search_bar_layout.addWidget(self.back_button)
 
         self.forward_button = QPushButton(self.central_widget)
-        forward_icon: Image.Image = self.rm.get("bxs-right-arrow")  # pyright: ignore[reportAssignmentType]
+        forward_icon: Image.Image = self.rm.get(
+            "bxs-right-arrow"
+        )  # pyright: ignore[reportAssignmentType]
         forward_icon = theme_fg_overlay(forward_icon, use_alpha=False)
         self.forward_button.setIcon(QPixmap.fromImage(ImageQt.ImageQt(forward_icon)))
         self.forward_button.setIconSize(QSize(16, 16))
