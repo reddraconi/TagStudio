@@ -64,6 +64,7 @@ from tagstudio.core.constants import (
     TAG_ARCHIVED,
     TAG_FAVORITE,
     TAG_META,
+    TAG_POTENTIAL_DUPLICATE,
     TS_FOLDER_NAME,
 )
 from tagstudio.core.enums import LibraryPrefs
@@ -166,8 +167,19 @@ def get_default_tags() -> tuple[Tag, ...]:
         color_slug="yellow",
         color_namespace="tagstudio-standard",
     )
+    potential_duplicate_tag = Tag(
+        id=TAG_POTENTIAL_DUPLICATE,
+        name="Potential Duplication",
+        aliases={
+            TagAlias(name="Potential Duplicate"),
+            TagAlias(name="Duplicate"),
+        },
+        parent_tags={meta_tag},
+        color_slug="orange",
+        color_namespace="tagstudio-standard",
+    )
 
-    return archive_tag, favorite_tag, meta_tag
+    return archive_tag, favorite_tag, meta_tag, potential_duplicate_tag
 
 
 # The difference in the number of default JSON tags vs default tags in the current version.
@@ -221,6 +233,7 @@ class Library:
     engine: Engine | None = None
     folder: Folder | None = None
     included_files: set[Path] = set()
+    _source_folders: list[Folder] = []
 
     def __init__(self) -> None:
         self.dupe_entries_count: int = -1  # NOTE: For internal management.
@@ -235,11 +248,107 @@ class Library:
         self.storage_path = None
         self.folder = None
         self.included_files = set()
+        self._source_folders = []
 
         self.dupe_entries_count = -1
         self.dupe_files_count = -1
         self.ignored_entries_count = -1
         self.unlinked_entries_count = -1
+
+    def get_source_folders(self) -> list[Folder]:
+        """Get all source folders in the library."""
+        with Session(self.engine) as session:
+            folders = session.scalars(select(Folder)).all()
+            result = []
+            for folder in folders:
+                session.expunge(folder)
+                result.append(folder)
+            return result
+
+    def add_source_folder(self, path: Path) -> Folder | None:
+        """Add a new source folder to the library."""
+        with Session(self.engine) as session:
+            existing = session.scalar(select(Folder).where(Folder.path == path))
+            if existing:
+                logger.warning("[Library] Folder already exists", path=path)
+                return None
+
+            folder = Folder(path=path, uuid=str(uuid4()))
+            try:
+                session.add(folder)
+                session.commit()
+                session.expunge(folder)
+                self._source_folders.append(folder)
+                logger.info("[Library] Added source folder", path=path)
+                return folder
+            except IntegrityError as e:
+                logger.error("[Library] Could not add source folder", error=e, path=path)
+                session.rollback()
+                return None
+
+    def remove_source_folder(self, folder_id: int) -> bool:
+        """Remove a source folder from the library.
+
+        All entries in this folder will also be removed.
+        """
+        with Session(self.engine) as session:
+            folder = session.scalar(select(Folder).where(Folder.id == folder_id))
+            if not folder:
+                logger.warning("[Library] Folder not found", folder_id=folder_id)
+                return False
+
+            try:
+                # Remove all entries in this folder
+                session.query(Entry).filter(Entry.folder_id == folder_id).delete()
+                # Remove the folder
+                session.delete(folder)
+                session.commit()
+                # Update cached source folders
+                self._source_folders = [f for f in self._source_folders if f.id != folder_id]
+                logger.info("[Library] Removed source folder", folder_id=folder_id)
+                return True
+            except Exception as e:
+                logger.error(
+                    "[Library] Could not remove source folder", error=e, folder_id=folder_id
+                )
+                session.rollback()
+                return False
+
+    def update_folder_path(self, folder_id: int, new_path: Path) -> bool:
+        """Update the path of a source folder."""
+        with Session(self.engine) as session:
+            folder = session.scalar(select(Folder).where(Folder.id == folder_id))
+            if not folder:
+                logger.warning("[Library] Folder not found", folder_id=folder_id)
+                return False
+
+            # Check if new path already exists
+            existing = session.scalar(select(Folder).where(Folder.path == new_path))
+            if existing and existing.id != folder_id:
+                logger.warning("[Library] New path already exists", path=new_path)
+                return False
+
+            try:
+                folder.path = new_path
+                session.commit()
+                # Update cached source folders
+                for f in self._source_folders:
+                    if f.id == folder_id:
+                        f.path = new_path
+                logger.info("[Library] Updated folder path", folder_id=folder_id, new_path=new_path)
+                return True
+            except Exception as e:
+                logger.error("[Library] Could not update folder path", error=e, folder_id=folder_id)
+                session.rollback()
+                return False
+
+    def resolve_entry_path(self, entry: Entry) -> Path:
+        """Resolve the full path of an entry by combining folder path and entry path."""
+        if entry.folder:
+            return entry.folder.path / entry.path
+        # Fallback for entries without folder (shouldn't happen in normal operation)
+        logger.warning("[Library] Entry has no folder", entry_id=entry.id)
+        return entry.path
 
     def migrate_json_to_sqlite(self, json_lib: JsonLibrary):
         """Migrate JSON library data to the SQLite database."""
@@ -351,6 +460,12 @@ class Library:
     def open_library(
         self, library_dir: Path, storage_path: Path | str | None = None
     ) -> LibraryStatus:
+        """Open a library from the library directory.
+
+        Args:
+            library_dir: Path to the directory containing the .tagstudio folder
+            storage_path: Optional custom database path (or ":memory:" for in-memory DB)
+        """
         is_new: bool = True
         if storage_path == ":memory:":
             self.storage_path = storage_path
@@ -517,6 +632,9 @@ class Library:
                 session.commit()
                 self.folder = folder
 
+            # Load all source folders
+            self._source_folders = self.get_source_folders()
+
             # Generate default .ts_ignore file
             if is_new:
                 try:
@@ -556,9 +674,11 @@ class Library:
                     self.__apply_db102_repairs(session)
                 if loaded_db_version < 103:
                     self.__apply_db103_default_data(session)
+                if loaded_db_version < 104:
+                    self.__apply_db104_migration(session, library_dir=library_dir)
 
                 # Convert file extension list to ts_ignore file, if a .ts_ignore file does not exist
-                self.migrate_sql_to_ts_ignore(library_dir)
+                self.migrate_sql_to_ts_ignore(library_dir=library_dir)
 
             # Update DB_VERSION
             if loaded_db_version < DB_VERSION:
@@ -733,6 +853,117 @@ class Library:
             )
             session.rollback()
 
+    def __apply_db104_migration(self, session: Session, library_dir: Path):
+        """Apply database schema changes for multi-root folder support in DB_VERSION 104."""
+        logger.info("[Library][Migration] Applying DB_VERSION 104 migration...")
+
+        try:
+            # Check if folder_id column exists in entries table
+            inspector = inspect(self.engine)
+            entry_columns = [col["name"] for col in inspector.get_columns("entries")]
+
+            if "folder_id" not in entry_columns:
+                # Add folder_id column to entries table
+                add_folder_id = text(
+                    "ALTER TABLE entries ADD COLUMN folder_id INTEGER REFERENCES folders(id)"
+                )
+                session.execute(add_folder_id)
+                session.commit()
+                logger.info("[Library][Migration] Added folder_id column to entries table")
+
+            # Ensure the main folder exists for library_dir
+            main_folder = session.scalar(select(Folder).where(Folder.path == library_dir))
+            if not main_folder:
+                main_folder = Folder(path=library_dir, uuid=str(uuid4()))
+                session.add(main_folder)
+                session.commit()
+                logger.info("[Library][Migration] Created main folder for library")
+
+            # Update any entries without a folder_id to use the main folder
+            update_null_folders = text(
+                "UPDATE entries SET folder_id = :folder_id WHERE folder_id IS NULL"
+            )
+            session.execute(update_null_folders, {"folder_id": main_folder.id})
+            session.commit()
+            logger.info("[Library][Migration] Assigned entries to main folder")
+
+            # Try to remove old unique constraint on path if it exists
+            try:
+                # SQLite doesn't support DROP CONSTRAINT, so we need to recreate the table
+                # First check if the constraint exists
+                unique_constraints = inspector.get_unique_constraints("entries")
+
+                has_old_path_constraint = False
+                for constraint in unique_constraints:
+                    if (
+                        "path" in constraint.get("column_names", [])
+                        and len(constraint["column_names"]) == 1
+                    ):
+                        has_old_path_constraint = True
+                        break
+
+                if has_old_path_constraint:
+                    logger.info(
+                        "[Library][Migration] Recreating entries table to update constraints"
+                    )
+
+                    # Create new table with correct schema
+                    session.execute(
+                        text(
+                            """
+                            CREATE TABLE entries_new (
+                                id INTEGER PRIMARY KEY,
+                                folder_id INTEGER NOT NULL REFERENCES folders(id),
+                                path TEXT NOT NULL,
+                                filename TEXT NOT NULL,
+                                suffix TEXT NOT NULL,
+                                date_created TIMESTAMP,
+                                date_modified TIMESTAMP,
+                                date_added TIMESTAMP,
+                                UNIQUE(folder_id, path)
+                            )
+                            """
+                        )
+                    )
+
+                    # Copy data from old table
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO entries_new
+                            SELECT id, folder_id, path, filename, suffix,
+                                   date_created, date_modified, date_added
+                            FROM entries
+                            """
+                        )
+                    )
+
+                    # Drop old table and rename new one
+                    session.execute(text("DROP TABLE entries"))
+                    session.execute(text("ALTER TABLE entries_new RENAME TO entries"))
+
+                    session.commit()
+                    logger.info("[Library][Migration] Updated entries table constraints")
+
+            except Exception as e:
+                logger.warning(
+                    "[Library][Migration] Could not update unique constraints "
+                    "(may already be correct)",
+                    error=e,
+                )
+                session.rollback()
+                # Continue with migration even if constraint update fails
+
+            logger.info("[Library][Migration] DB_VERSION 104 migration completed successfully")
+
+        except Exception as e:
+            logger.error(
+                "[Library][Migration] Failed to apply DB_VERSION 104 migration!",
+                error=e,
+            )
+            session.rollback()
+            raise
+
     def migrate_sql_to_ts_ignore(self, library_dir: Path):
         # Do not continue if existing '.ts_ignore' file is found
         if Path(library_dir / TS_FOLDER_NAME / IGNORE_NAME).exists():
@@ -775,7 +1006,9 @@ class Library:
     def get_entry(self, entry_id: int) -> Entry | None:
         """Load entry without joins."""
         with Session(self.engine) as session:
-            entry = session.scalar(select(Entry).where(Entry.id == entry_id))
+            entry = session.scalar(
+                select(Entry).where(Entry.id == entry_id).options(joinedload(Entry.folder))
+            )
             if not entry:
                 return None
             session.expunge(entry)
@@ -793,7 +1026,9 @@ class Library:
         with Session(self.engine) as session:
             tags: set[Tag] | None = None
             tag_stmt: Select[tuple[Tag]]
-            entry_stmt = select(Entry).where(Entry.id == entry_id).limit(1)
+            entry_stmt = (
+                select(Entry).where(Entry.id == entry_id).limit(1).options(joinedload(Entry.folder))
+            )
             if with_fields:
                 entry_stmt = (
                     entry_stmt.outerjoin(Entry.text_fields)
@@ -801,6 +1036,7 @@ class Library:
                     .options(
                         selectinload(Entry.text_fields),
                         selectinload(Entry.datetime_fields),
+                        joinedload(Entry.folder),
                     )
                 )
             # if with_tags:
@@ -836,7 +1072,9 @@ class Library:
 
     def get_entries(self, entry_ids: Iterable[int]) -> list[Entry]:
         with Session(self.engine) as session:
-            statement = select(Entry).where(Entry.id.in_(entry_ids))
+            statement = (
+                select(Entry).where(Entry.id.in_(entry_ids)).options(joinedload(Entry.folder))
+            )
             entries = dict((e.id, e) for e in session.scalars(statement))
             return [entries[id] for id in entry_ids]
 
@@ -856,6 +1094,7 @@ class Library:
                     selectinload(Tag.aliases),
                     selectinload(Tag.parent_tags),
                 ),
+                joinedload(Entry.folder),
             )
             statement = statement.distinct()
             entries: ScalarResult[Entry] | list[Entry] = session.execute(statement).scalars()
@@ -875,7 +1114,11 @@ class Library:
             stmt = (
                 stmt.outerjoin(Entry.text_fields)
                 .outerjoin(Entry.datetime_fields)
-                .options(selectinload(Entry.text_fields), selectinload(Entry.datetime_fields))
+                .options(
+                    selectinload(Entry.text_fields),
+                    selectinload(Entry.datetime_fields),
+                    joinedload(Entry.folder),
+                )
             )
             stmt = (
                 stmt.outerjoin(Entry.tags)
@@ -884,7 +1127,8 @@ class Library:
                     selectinload(Entry.tags).options(
                         joinedload(Tag.aliases),
                         joinedload(Tag.parent_tags),
-                    )
+                    ),
+                    joinedload(Entry.folder),
                 )
             )
             entry = session.scalar(stmt)
@@ -915,7 +1159,7 @@ class Library:
     def all_entries(self, with_joins: bool = False) -> Iterator[Entry]:
         """Load entries without joins."""
         with Session(self.engine) as session:
-            stmt = select(Entry)
+            stmt = select(Entry).options(joinedload(Entry.folder))
             if with_joins:
                 # load Entry with all joins and all tags
                 stmt = (
@@ -927,6 +1171,7 @@ class Library:
                     contains_eager(Entry.text_fields),
                     contains_eager(Entry.datetime_fields),
                     contains_eager(Entry.tags),
+                    joinedload(Entry.folder),
                 )
 
             stmt = stmt.distinct()
@@ -970,6 +1215,24 @@ class Library:
             full_ts_path.mkdir(parents=True, exist_ok=True)
             return False
         return True
+
+    def is_legacy_library(self) -> bool:
+        """Check if this is a legacy library (pre-multi-root).
+
+        A legacy library is one where the library directory is also
+        the only source folder, indicating it was created before
+        multi-root support was added.
+
+        Returns:
+            bool: True if this is a legacy library, False otherwise
+        """
+        if not self.library_dir:
+            return False
+
+        folders = self.get_source_folders()
+
+        # Legacy library has exactly one source folder that matches library_dir
+        return len(folders) == 1 and folders[0].path == self.library_dir
 
     def add_entries(self, items: list[Entry]) -> list[int]:
         """Add multiple Entry records to the Library."""

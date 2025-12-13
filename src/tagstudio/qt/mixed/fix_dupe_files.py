@@ -94,8 +94,14 @@ class FixDupeFilesModal(QWidget):
         self.set_dupe_count(-1)
 
     def select_file(self):
+        # Start file dialog in first source folder if available, otherwise library_dir
+        start_dir = self.lib.library_dir
+        source_folders = self.lib.get_source_folders()
+        if source_folders:
+            start_dir = source_folders[0].path
+
         qfd = QFileDialog(
-            self, Translations["file.duplicates.dupeguru.open_file"], str(self.lib.library_dir)
+            self, Translations["file.duplicates.dupeguru.open_file"], str(start_dir)
         )
         qfd.setFileMode(QFileDialog.FileMode.ExistingFile)
         qfd.setNameFilter(Translations["file.duplicates.dupeguru.file_extension"])

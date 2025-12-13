@@ -51,7 +51,9 @@ class SplashScreen:
 
     def get_pixmap(self) -> QPixmap:
         """Get the pixmap used for the splash screen."""
-        pixmap: QPixmap | None = self.rm.get(f"splash_{self.splash_name}")  # pyright: ignore[reportAssignmentType]
+        pixmap: QPixmap | None = self.rm.get(
+            f"splash_{self.splash_name}"
+        )  # pyright: ignore[reportAssignmentType]
         if not pixmap:
             logger.error("[Splash] Splash screen not found:", splash_name=self.splash_name)
             pixmap = QPixmap(960, 540)

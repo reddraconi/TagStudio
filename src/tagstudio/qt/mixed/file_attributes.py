@@ -161,7 +161,13 @@ class FileAttributes(QWidget):
             if self.driver.settings.show_filepath == ShowFilepathOption.SHOW_FULL_PATHS:
                 display_path = filepath
             elif self.driver.settings.show_filepath == ShowFilepathOption.SHOW_RELATIVE_PATHS:
-                display_path = Path(filepath).relative_to(unwrap(self.library.library_dir))
+                # Try to get relative path from any source folder
+                for folder in self.library.get_source_folders():
+                    try:
+                        display_path = Path(filepath).relative_to(folder.path)
+                        break
+                    except ValueError:
+                        continue
             elif self.driver.settings.show_filepath == ShowFilepathOption.SHOW_FILENAMES_ONLY:
                 display_path = Path(filepath.name)
 

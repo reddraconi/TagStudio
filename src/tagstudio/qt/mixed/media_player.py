@@ -99,12 +99,14 @@ class MediaPlayer(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QGraphicsView {
                background: transparent;
                border: none;
             }
-        """)
+        """
+        )
         self.setObjectName("mediaPlayer")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 

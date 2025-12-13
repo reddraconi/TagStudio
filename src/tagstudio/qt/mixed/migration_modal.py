@@ -28,6 +28,7 @@ from tagstudio.core.constants import (
     TAG_ARCHIVED,
     TAG_FAVORITE,
     TAG_META,
+    TAG_POTENTIAL_DUPLICATE,
     TS_FOLDER_NAME,
 )
 from tagstudio.core.enums import LibraryPrefs
@@ -360,6 +361,22 @@ class JsonMigrationModal(QObject):
         favorite_tag.subtag_ids.append(TAG_META)
         self.json_lib.update_tag(favorite_tag)
 
+        # v9.5.1: Add "Potential Duplication" tag and parent that to "Meta Tags".
+        potential_duplicate_tag: JsonTag = JsonTag(
+            TAG_POTENTIAL_DUPLICATE,
+            "Potential Duplication",
+            "",
+            ["Potential Duplicate", "Duplicate"],
+            [],
+            "",
+        )
+        self.json_lib.tags.append(potential_duplicate_tag)
+        self.json_lib._map_tag_id_to_index(potential_duplicate_tag, len(self.json_lib.tags) - 1)
+
+        meta_tag: JsonTag = self.json_lib.get_tag(TAG_META)
+        meta_tag.subtag_ids.append(TAG_POTENTIAL_DUPLICATE)
+        self.json_lib.update_tag(meta_tag)
+
     def migration_progress(self, skip_ui: bool = False):
         """Initialize the progress bar and iterator for the library migration."""
         pb = QProgressDialog(
@@ -376,12 +393,16 @@ class JsonMigrationModal(QObject):
             iterator.value.connect(
                 lambda x: (
                     pb.setLabelText(f"<h4>{x}</h4>"),  # type: ignore
-                    self.update_sql_value_ui(show_msg_box=False)
-                    if x == Translations["json_migration.checking_for_parity"]
-                    else (),
-                    self.update_parity_ui()
-                    if x == Translations["json_migration.checking_for_parity"]
-                    else (),
+                    (
+                        self.update_sql_value_ui(show_msg_box=False)
+                        if x == Translations["json_migration.checking_for_parity"]
+                        else ()
+                    ),
+                    (
+                        self.update_parity_ui()
+                        if x == Translations["json_migration.checking_for_parity"]
+                        else ()
+                    ),
                 )
             )
             r = CustomRunnable(iterator.run)

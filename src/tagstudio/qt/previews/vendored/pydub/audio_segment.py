@@ -118,7 +118,9 @@ def read_wav_audio(data, headers=None):
     pos = fmt.position + 8
     audio_format = struct.unpack_from("<H", data[pos : pos + 2])[0]
     if audio_format != 1 and audio_format != 0xFFFE:
-        raise CouldntDecodeError("Unknown audio format 0x%X in wav data" % audio_format)  # noqa: UP031
+        raise CouldntDecodeError(
+            "Unknown audio format 0x%X in wav data" % audio_format
+        )  # noqa: UP031
 
     channels = struct.unpack_from("<H", data[pos + 2 : pos + 4])[0]
     sample_rate = struct.unpack_from("<I", data[pos + 4 : pos + 8])[0]

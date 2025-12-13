@@ -663,7 +663,9 @@ class ThumbRenderer(QObject):
                     artwork = Image.open(BytesIO(flac_covers[0].data))
             elif ext in [".mp4", ".m4a", ".aac"]:
                 mp4_tags: mp4.MP4 = mp4.MP4(filepath)
-                mp4_covers: list | None = mp4_tags.get("covr")  # pyright: ignore[reportAssignmentType]
+                mp4_covers: list | None = mp4_tags.get(
+                    "covr"
+                )  # pyright: ignore[reportAssignmentType]
                 if mp4_covers:
                     artwork = Image.open(BytesIO(mp4_covers[0]))
             if artwork:
@@ -1527,15 +1529,19 @@ class ThumbRenderer(QObject):
 
             # Check if the file is supposed to be ignored and render an overlay if needed
             try:
-                if (
-                    image
-                    and Ignore.compiled_patterns
-                    and Ignore.compiled_patterns.match(
-                        filepath.relative_to(unwrap(self.driver.lib.library_dir))
-                    )
-                ):
-                    image = render_ignored((adj_size, adj_size), pixel_ratio, image)
-            except TypeError:
+                if image and Ignore.compiled_patterns:
+                    # Try to get relative path from any source folder
+                    relative_path = None
+                    for folder in self.driver.lib.get_source_folders():
+                        try:
+                            relative_path = filepath.relative_to(folder.path)
+                            break
+                        except ValueError:
+                            continue
+
+                    if relative_path and Ignore.compiled_patterns.match(relative_path):
+                        image = render_ignored((adj_size, adj_size), pixel_ratio, image)
+            except (TypeError, Exception):
                 pass
 
         # A loading thumbnail (cached in memory)

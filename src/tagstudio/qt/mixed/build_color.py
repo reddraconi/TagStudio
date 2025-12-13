@@ -127,9 +127,11 @@ class BuildColorPanel(PanelWidget):
         self.border_checkbox.setFixedSize(22, 22)
         self.border_checkbox.clicked.connect(
             lambda checked: self.update_secondary(
-                color=QColor(unwrap(self.preview_button.tag_color_group).secondary)
-                if unwrap(self.preview_button.tag_color_group).secondary
-                else None,
+                color=(
+                    QColor(unwrap(self.preview_button.tag_color_group).secondary)
+                    if unwrap(self.preview_button.tag_color_group).secondary
+                    else None
+                ),
                 color_border=checked,
             )
         )

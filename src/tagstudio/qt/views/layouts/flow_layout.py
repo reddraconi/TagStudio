@@ -43,14 +43,18 @@ class FlowLayout(QLayout):
         return len(self._item_list)
 
     @override
-    def itemAt(self, index: int) -> QLayoutItem | None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def itemAt(
+        self, index: int
+    ) -> QLayoutItem | None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if 0 <= index < len(self._item_list):
             return self._item_list[index]
 
         return None
 
     @override
-    def takeAt(self, index: int) -> QLayoutItem | None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def takeAt(
+        self, index: int
+    ) -> QLayoutItem | None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if 0 <= index < len(self._item_list):
             return self._item_list.pop(index)
 

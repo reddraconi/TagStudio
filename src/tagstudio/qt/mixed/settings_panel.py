@@ -102,8 +102,8 @@ class SettingsPanel(PanelWidget):
         self.__build_global_settings()
         self.tab_widget.addTab(self.global_settings_container, Translations["settings.global"])
 
-        # self.__build_library_settings()
-        # self.tab_widget.addTab(self.library_settings_container, Translations["settings.library"])
+        self.__build_library_settings()
+        self.tab_widget.addTab(self.library_settings_container, Translations["settings.library"])
 
         self.root_layout.addWidget(self.tab_widget)
 
@@ -274,13 +274,56 @@ class SettingsPanel(PanelWidget):
         self.zeropadding_checkbox.setChecked(self.driver.settings.zero_padding)
         form_layout.addRow(Translations["settings.zeropadding.label"], self.zeropadding_checkbox)
 
-    # TODO: Implement Library Settings
-    def __build_library_settings(self):  # pyright: ignore[reportUnusedFunction]
+    def __build_library_settings(self):
         form_layout = QFormLayout(self.library_settings_container)
         form_layout.setContentsMargins(6, 6, 6, 6)
 
-        todo_label = QLabel("TODO")
-        form_layout.addRow(todo_label)
+        # Library Directory
+        library_dir_label = QLabel(Translations["settings.library.library_dir"])
+        if self.driver.lib.library_dir:
+            library_dir_value = QLabel(str(self.driver.lib.library_dir))
+            library_dir_value.setWordWrap(True)
+            library_dir_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        else:
+            library_dir_value = QLabel(Translations["settings.library.no_library"])
+        form_layout.addRow(library_dir_label, library_dir_value)
+
+        # Source Folders
+        source_folders_label = QLabel(Translations["settings.library.source_folders"])
+        source_folders_widget = QWidget()
+        source_folders_layout = QVBoxLayout(source_folders_widget)
+        source_folders_layout.setContentsMargins(0, 0, 0, 0)
+        source_folders_layout.setSpacing(4)
+
+        if self.driver.lib.library_dir:
+            folders = self.driver.lib.get_source_folders()
+            if folders:
+                for folder in folders:
+                    folder_label = QLabel(f"• {folder.path}")
+                    folder_label.setWordWrap(True)
+                    folder_label.setTextInteractionFlags(
+                        Qt.TextInteractionFlag.TextSelectableByMouse
+                    )
+                    source_folders_layout.addWidget(folder_label)
+            else:
+                no_folders_label = QLabel(Translations["settings.library.no_source_folders"])
+                source_folders_layout.addWidget(no_folders_label)
+        else:
+            no_library_label = QLabel(Translations["settings.library.no_library"])
+            source_folders_layout.addWidget(no_library_label)
+
+        source_folders_layout.addStretch()
+        form_layout.addRow(source_folders_label, source_folders_widget)
+
+        # Library Statistics (optional)
+        if self.driver.lib.library_dir:
+            stats_label = QLabel(Translations["settings.library.statistics"])
+            stats_value = QLabel(
+                Translations.format(
+                    "settings.library.entry_count", count=f"{self.driver.lib.entries_count:n}"
+                )
+            )
+            form_layout.addRow(stats_label, stats_value)
 
     def __get_language(self) -> str:
         return list(LANGUAGES.values())[self.language_combobox.currentIndex()]

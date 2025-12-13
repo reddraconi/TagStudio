@@ -167,9 +167,11 @@ class DropImportModal(QWidget):
 
         def displayed_text(x):
             return Translations.format(
-                "drop_import.progress.label.singular"
-                if x[0] + 1 == 1
-                else "drop_import.progress.label.plural",
+                (
+                    "drop_import.progress.label.singular"
+                    if x[0] + 1 == 1
+                    else "drop_import.progress.label.plural"
+                ),
                 count=x[0] + 1,
                 suffix=f" {x[1]} {self.choice.value}" if self.choice else "",
             )

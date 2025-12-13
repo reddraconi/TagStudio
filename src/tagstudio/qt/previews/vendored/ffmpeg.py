@@ -65,7 +65,9 @@ def probe(filename, cmd=FFPROBE_CMD, timeout=None, **kwargs):
             ``stderr`` property of the exception.
     """
     args = [cmd, "-show_format", "-show_streams", "-of", "json"]
-    args += ffmpeg._utils.convert_kwargs_to_cmd_line_args(kwargs)  # pyright: ignore[reportAttributeAccessIssue]
+    args += ffmpeg._utils.convert_kwargs_to_cmd_line_args(
+        kwargs
+    )  # pyright: ignore[reportAttributeAccessIssue]
     args += [filename]
 
     # PATCHED

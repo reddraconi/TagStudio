@@ -6,7 +6,7 @@ from datetime import datetime as dt
 from pathlib import Path
 from typing import override
 
-from sqlalchemy import JSON, ForeignKey, ForeignKeyConstraint, Integer, event
+from sqlalchemy import JSON, ForeignKey, ForeignKeyConstraint, Integer, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing_extensions import deprecated
 
@@ -187,21 +187,37 @@ class Tag(Base):
 class Folder(Base):
     __tablename__ = "folders"
 
-    # TODO - implement this
     id: Mapped[int] = mapped_column(primary_key=True)
     path: Mapped[Path] = mapped_column(PathType, unique=True)
     uuid: Mapped[str] = mapped_column(unique=True)
 
+    settings: Mapped["FolderSettings"] = relationship(
+        "FolderSettings", back_populates="folder", cascade="all, delete", uselist=False
+    )
+
+
+class FolderSettings(Base):
+    __tablename__ = "folder_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    folder_id: Mapped[int] = mapped_column(ForeignKey("folders.id"), unique=True)
+    folder: Mapped[Folder] = relationship("Folder", back_populates="settings")
+
+    ignore_patterns: Mapped[str | None] = mapped_column(nullable=True)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    display_name: Mapped[str | None] = mapped_column(nullable=True)
+
 
 class Entry(Base):
     __tablename__ = "entries"
+    __table_args__ = (UniqueConstraint("folder_id", "path", name="uix_folder_path"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
     folder_id: Mapped[int] = mapped_column(ForeignKey("folders.id"))
     folder: Mapped[Folder] = relationship("Folder")
 
-    path: Mapped[Path] = mapped_column(PathType, unique=True)
+    path: Mapped[Path] = mapped_column(PathType, unique=False)
     filename: Mapped[str] = mapped_column()
     suffix: Mapped[str] = mapped_column()
     date_created: Mapped[dt | None]

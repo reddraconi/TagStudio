@@ -40,13 +40,20 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QInputDialog,
     QMessageBox,
     QPushButton,
     QScrollArea,
 )
 
 import tagstudio.qt.resources_rc  # noqa: F401
-from tagstudio.core.constants import TAG_ARCHIVED, TAG_FAVORITE, VERSION, VERSION_BRANCH
+from tagstudio.core.constants import (
+    TAG_ARCHIVED,
+    TAG_FAVORITE,
+    TS_FOLDER_NAME,
+    VERSION,
+    VERSION_BRANCH,
+)
 from tagstudio.core.driver import DriverMixin
 from tagstudio.core.enums import MacroID, SettingItems, ShowFilepathOption
 from tagstudio.core.library.alchemy.enums import (
@@ -272,14 +279,85 @@ class QtDriver(DriverMixin, QObject):
                 thread.start()
 
     def open_library_from_dialog(self):
-        dir = QFileDialog.getExistingDirectory(
-            parent=None,
-            caption=Translations["window.title.open_create_library"],
-            dir="/",
+        """Show dialog to open existing or create new library."""
+        # Ask user if they want to create a new library or open an existing one
+        msg_box = QMessageBox()
+        msg_box.setWindowTitle(Translations["window.title.open_create_library"])
+        msg_box.setText(Translations["library.open_or_create.message"])
+        create_button = msg_box.addButton(
+            Translations["library.open_or_create.create_new"], QMessageBox.ButtonRole.AcceptRole
+        )
+        open_button = msg_box.addButton(
+            Translations["library.open_or_create.open_existing"], QMessageBox.ButtonRole.AcceptRole
+        )
+        msg_box.addButton(QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(create_button)
+
+        msg_box.exec()
+
+        clicked_button = msg_box.clickedButton()
+        if clicked_button == create_button:
+            self.__create_new_library_dialog()
+        elif clicked_button == open_button:
+            self.__open_existing_library_dialog()
+
+    def __create_new_library_dialog(self):
+        """Create a new library using XDG defaults."""
+        from tagstudio.core.paths import get_default_library_dir
+
+        # Ask for library name
+        library_name, ok = QInputDialog.getText(
+            self.main_window,
+            Translations["library.create_new.title"],
+            Translations["library.create_new.name_prompt"],
+            text="default",
+        )
+
+        if ok and library_name:
+            # Get XDG-compliant default path
+            library_path = get_default_library_dir(library_name)
+
+            # Check if library already exists
+            if library_path.exists() and (library_path / TS_FOLDER_NAME).exists():
+                msg_box = QMessageBox()
+                msg_box.setIcon(QMessageBox.Icon.Question)
+                msg_box.setWindowTitle(Translations["library.create_new.exists_title"])
+                msg_box.setText(
+                    Translations.format(
+                        "library.create_new.exists_message", library_path=str(library_path)
+                    )
+                )
+                msg_box.setStandardButtons(
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+
+                if msg_box.exec() == QMessageBox.StandardButton.Yes:
+                    self.open_library(library_path)
+                return
+
+            # Create the directory and open the library
+            try:
+                library_path.mkdir(parents=True, exist_ok=True)
+                self.open_library(library_path)
+            except Exception as e:
+                logger.error(f"[Library] Failed to create library directory: {e}")
+                self.show_error_message(
+                    error_name=Translations["library.create_new.error_title"],
+                    error_desc=str(e),
+                )
+
+    def __open_existing_library_dialog(self):
+        """Open an existing library by browsing for its metadata directory."""
+        dir_path = QFileDialog.getExistingDirectory(
+            parent=self.main_window,
+            caption=Translations["library.open_existing.title"],
+            dir=str(Path.home()),
             options=QFileDialog.Option.ShowDirsOnly,
         )
-        if dir not in (None, ""):
-            self.open_library(Path(dir))
+
+        if dir_path:
+            self.open_library(Path(dir_path))
 
     def signal_handler(self, sig, frame):
         if sig in (SIGINT, SIGTERM, SIGQUIT):
@@ -413,6 +491,11 @@ class QtDriver(DriverMixin, QObject):
         # Refresh Directories
         self.main_window.menu_bar.refresh_dir_action.triggered.connect(
             lambda: self.call_if_library_open(self.add_new_files_callback)
+        )
+
+        # Manage Source Folders
+        self.main_window.menu_bar.manage_folders_action.triggered.connect(
+            lambda: self.call_if_library_open(self.show_manage_folders_dialog)
         )
 
         # Close Library
@@ -770,6 +853,7 @@ class QtDriver(DriverMixin, QObject):
             self.main_window.menu_bar.save_library_backup_action.setEnabled(False)
             self.main_window.menu_bar.close_library_action.setEnabled(False)
             self.main_window.menu_bar.refresh_dir_action.setEnabled(False)
+            self.main_window.menu_bar.manage_folders_action.setEnabled(False)
             self.main_window.menu_bar.tag_manager_action.setEnabled(False)
             self.main_window.menu_bar.color_manager_action.setEnabled(False)
             self.main_window.menu_bar.ignore_modal_action.setEnabled(False)
@@ -1025,31 +1109,42 @@ class QtDriver(DriverMixin, QObject):
         pw.update_label(Translations["library.refresh.scanning_preparing"])
         pw.show()
 
-        iterator = FunctionIterator(
-            lambda lib=unwrap(self.lib.library_dir): tracker.refresh_dir(lib)  # noqa: B008
-        )
-        iterator.value.connect(
-            lambda x: (
-                pw.update_progress(x + 1),
-                pw.update_label(
-                    Translations.format(
-                        "library.refresh.scanning.plural"
-                        if x + 1 != 1
-                        else "library.refresh.scanning.singular",
-                        searched_count=f"{x + 1:n}",
-                        found_count=f"{tracker.files_count:n}",
-                    )
-                ),
+        # Use refresh_all_folders for multi-folder support
+        iterator = FunctionIterator(tracker.refresh_all_folders)
+
+        def update_scan_progress(result):
+            # Result is a tuple: (files_scanned, current_folder, folder_index, total_folders)
+            files_scanned, current_folder, folder_idx, total_folders = result
+            pw.update_progress(files_scanned + 1)
+            pw.update_label(
+                Translations.format(
+                    "library.refresh.scanning.folders",
+                    folder_num=f"{folder_idx + 1}",
+                    total_folders=f"{total_folders}",
+                    searched_count=f"{files_scanned + 1:n}",
+                    found_count=f"{tracker.files_count:n}",
+                    folder_path=str(current_folder.path.name),
+                )
             )
-        )
+            # Update status bar
+            self.main_window.status_bar.showMessage(
+                f"Scanning: {files_scanned + 1:n} files checked, "
+                f"{tracker.files_count:n} new files found",
+                3000,
+            )
+
+        iterator.value.connect(update_scan_progress)
         r = CustomRunnable(iterator.run)
-        r.done.connect(
-            lambda: (
-                pw.hide(),
-                pw.deleteLater(),
-                self.add_new_files_runnable(tracker),
+
+        def on_scan_complete():
+            pw.hide()
+            pw.deleteLater()
+            self.main_window.status_bar.showMessage(
+                f"Scan complete: {tracker.files_count:n} new files found", 5000
             )
-        )
+            self.add_new_files_runnable(tracker)
+
+        r.done.connect(on_scan_complete)
         QThreadPool.globalInstance().start(r)
 
     def add_new_files_runnable(self, tracker: RefreshTracker):
@@ -1551,6 +1646,28 @@ class QtDriver(DriverMixin, QObject):
         self.cached_values.sync()
         self.update_recent_lib_menu()
 
+    def show_manage_folders_dialog(self):
+        """Show the manage source folders dialog."""
+        from tagstudio.qt.mixed.manage_folders_dialog import ManageFoldersDialog
+
+        # Keep reference to prevent garbage collection
+        self.manage_folders_dialog = ManageFoldersDialog(self)
+        self.manage_folders_dialog.show()
+
+    def __show_legacy_migration_info(self):
+        """Show information dialog about legacy library migration."""
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        msg_box.setWindowTitle(Translations["library.legacy.migration_title"])
+        msg_box.setText(Translations["library.legacy.migration_message"])
+        msg_box.setInformativeText(
+            Translations.format(
+                "library.legacy.migration_info", library_path=str(self.lib.library_dir)
+            )
+        )
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()
+
     def open_settings_modal(self):
         SettingsPanel.build_modal(self).show()
 
@@ -1620,9 +1737,18 @@ class QtDriver(DriverMixin, QObject):
         Ignore.get_patterns(self.lib.library_dir, include_global=True)
         self.__reset_navigation()
 
-        # TODO - make this call optional
-        if self.lib.entries_count < 10000:
-            self.add_new_files_callback()
+        # Check if library has any source folders, prompt to add one if not
+        source_folders = self.lib.get_source_folders()
+        if not source_folders:
+            self.__prompt_add_first_source_folder()
+        else:
+            # Check if this is a legacy library and inform the user
+            if self.lib.is_legacy_library():
+                self.__show_legacy_migration_info()
+
+            # TODO - make this call optional
+            if self.lib.entries_count < 10000:
+                self.add_new_files_callback()
 
         if self.settings.show_filepath == ShowFilepathOption.SHOW_FULL_PATHS:
             library_dir_display = self.lib.library_dir
@@ -1645,6 +1771,7 @@ class QtDriver(DriverMixin, QObject):
         self.main_window.menu_bar.save_library_backup_action.setEnabled(True)
         self.main_window.menu_bar.close_library_action.setEnabled(True)
         self.main_window.menu_bar.refresh_dir_action.setEnabled(True)
+        self.main_window.menu_bar.manage_folders_action.setEnabled(True)
         self.main_window.menu_bar.tag_manager_action.setEnabled(True)
         self.main_window.menu_bar.color_manager_action.setEnabled(True)
         self.main_window.menu_bar.ignore_modal_action.setEnabled(True)
@@ -1668,6 +1795,62 @@ class QtDriver(DriverMixin, QObject):
 
         self.main_window.toggle_landing_page(enabled=False)
         return open_status
+
+    def __prompt_add_first_source_folder(self) -> bool:
+        """Prompt user to add the first source folder to the library.
+
+        Returns:
+            bool: True if a folder was added, False otherwise
+        """
+        # Show message box asking if user wants to add a source folder
+        msg_box = QMessageBox()
+        msg_box.setWindowTitle(Translations["library.add_source_folder.title"])
+        msg_box.setText(Translations["library.add_source_folder.message"])
+        msg_box.setInformativeText(Translations["library.add_source_folder.description"])
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+
+        if msg_box.exec() == QMessageBox.StandardButton.Yes:
+            # Open directory picker
+            dir_path = QFileDialog.getExistingDirectory(
+                parent=self.main_window,
+                caption=Translations["library.add_source_folder.select_directory"],
+                dir=str(Path.home()),
+                options=QFileDialog.Option.ShowDirsOnly,
+            )
+
+            if dir_path:
+                folder_path = Path(dir_path)
+                try:
+                    self.lib.add_source_folder(folder_path)
+                    logger.info(f"[Library] Added source folder: {folder_path}")
+
+                    # Ask if user wants to scan the folder now
+                    scan_msg = QMessageBox()
+                    scan_msg.setWindowTitle(Translations["library.scan_folder.title"])
+                    scan_msg.setText(
+                        Translations.format(
+                            "library.scan_folder.message", folder_path=folder_path.name
+                        )
+                    )
+                    scan_msg.setStandardButtons(
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    scan_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+
+                    if scan_msg.exec() == QMessageBox.StandardButton.Yes:
+                        self.add_new_files_callback()
+
+                    return True
+                except Exception as e:
+                    logger.error(f"[Library] Failed to add source folder: {e}")
+                    self.show_error_message(
+                        error_name=Translations["library.add_source_folder.error_title"],
+                        error_desc=str(e),
+                    )
+                    return False
+
+        return False
 
     def drop_event(self, event: QDropEvent):
         if event.source() is self:

@@ -130,7 +130,7 @@ def library(request, library_dir: Path):  # pyright: ignore
     assert lib.add_tags_to_entries(entry2.id, tag2.id)
 
     assert lib.add_entries([entry, entry2])
-    assert len(lib.tags) == 6
+    assert len(lib.tags) == 7
 
     yield lib
 

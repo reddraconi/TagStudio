@@ -45,7 +45,9 @@ class Pagination(QWidget):
 
         # [<] ----------------------------------
         self.prev_button = QPushButtonWrapper()
-        prev_icon: Image.Image = self.rm.get("bxs-left-arrow")  # pyright: ignore[reportAssignmentType]
+        prev_icon: Image.Image = self.rm.get(
+            "bxs-left-arrow"
+        )  # pyright: ignore[reportAssignmentType]
         prev_icon = theme_fg_overlay(prev_icon, use_alpha=False)
         self.prev_button.setIcon(QPixmap.fromImage(ImageQt.ImageQt(prev_icon)))
         self.prev_button.setIconSize(QSize(12, 12))
@@ -98,7 +100,9 @@ class Pagination(QWidget):
 
         # ---------------------------------- [>]
         self.next_button = QPushButtonWrapper()
-        next_icon: Image.Image = self.rm.get("bxs-right-arrow")  # pyright: ignore[reportAssignmentType]
+        next_icon: Image.Image = self.rm.get(
+            "bxs-right-arrow"
+        )  # pyright: ignore[reportAssignmentType]
         next_icon = theme_fg_overlay(next_icon, use_alpha=False)
         self.next_button.setIcon(QPixmap.fromImage(ImageQt.ImageQt(next_icon)))
         self.next_button.setIconSize(QSize(12, 12))
@@ -160,8 +164,12 @@ class Pagination(QWidget):
                 srt_scale = max(1, (7 - (end_page - index)))
 
             if page_count >= 8:
-                end_size = self.button_size.width() * end_scale + (3 * (end_scale - 1))  # pyright: ignore[reportPossiblyUnboundVariable]
-                srt_size = self.button_size.width() * srt_scale + (3 * (srt_scale - 1))  # pyright: ignore[reportPossiblyUnboundVariable]
+                end_size = self.button_size.width() * end_scale + (
+                    3 * (end_scale - 1)
+                )  # pyright: ignore[reportPossiblyUnboundVariable]
+                srt_size = self.button_size.width() * srt_scale + (
+                    3 * (srt_scale - 1)
+                )  # pyright: ignore[reportPossiblyUnboundVariable]
                 self.end_ellipses.setMinimumWidth(end_size)
                 self.end_ellipses.setMaximumWidth(end_size)
                 self.start_ellipses.setMinimumWidth(srt_size)
