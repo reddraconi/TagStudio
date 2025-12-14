@@ -31,6 +31,11 @@ class PasteTagsDialog(QWidget):
 
     mode_selected = Signal(str)  # Emits "merge" or "replace"
 
+    # Style constants
+    STYLE_ADD = "color: green; font-weight: bold;"
+    STYLE_REMOVE = "color: red; font-weight: bold;"
+    STYLE_NO_CHANGE = "color: gray; font-style: italic;"
+
     def __init__(
         self,
         tags_clipboard: set[int],
@@ -128,16 +133,50 @@ class PasteTagsDialog(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-        if self.preset_mode:
-            mode = self.preset_mode
-        else:
-            mode = "merge" if self.merge_radio.isChecked() else "replace"
+        mode = self.preset_mode or ("merge" if self.merge_radio.isChecked() else "replace")
 
         for entry in self.selected_entries:
             entry_widget = self._create_entry_delta_widget(entry, mode)
             self.delta_layout.addWidget(entry_widget)
 
         self.delta_layout.addStretch()
+
+    def _create_tag_delta_section(self, tag_ids: set[int], label_text: str, style: str) -> QWidget:
+        """Create a tag delta section showing tags to add or remove.
+
+        Args:
+            tag_ids: Set of tag IDs to display
+            label_text: Label text (e.g., "+ Add:" or "- Remove:")
+            style: CSS style string for the label
+
+        Returns:
+            QWidget containing the tag delta section
+        """
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        label = QLabel(label_text)
+        label.setStyleSheet(style)
+        layout.addWidget(label)
+
+        tags_flow = QWidget()
+        tags_flow_layout = QHBoxLayout(tags_flow)
+        tags_flow_layout.setContentsMargins(0, 0, 0, 0)
+        tags_flow_layout.setSpacing(4)
+
+        for tag_id in sorted(tag_ids):
+            tag = self.library.get_tag(tag_id)
+            if tag:
+                tag_widget = TagWidget(
+                    tag=tag, has_edit=False, has_remove=False, library=self.library
+                )
+                tags_flow_layout.addWidget(tag_widget)
+
+        tags_flow_layout.addStretch()
+        layout.addWidget(tags_flow)
+        return container
 
     def _create_entry_delta_widget(self, entry, mode: str):
         """Create widget showing tag changes for entry."""
@@ -156,68 +195,18 @@ class PasteTagsDialog(QWidget):
         tags_to_remove = current_tag_ids - self.tags_clipboard if mode == "replace" else set()
 
         if tags_to_add:
-            add_container = QWidget()
-            add_layout = QHBoxLayout(add_container)
-            add_layout.setContentsMargins(0, 0, 0, 0)
-            add_layout.setSpacing(4)
-
-            add_label = QLabel("+ Add:")
-            add_label.setStyleSheet("color: green; font-weight: bold;")
-            add_layout.addWidget(add_label)
-
-            tags_flow = QWidget()
-            tags_flow_layout = QHBoxLayout(tags_flow)
-            tags_flow_layout.setContentsMargins(0, 0, 0, 0)
-            tags_flow_layout.setSpacing(4)
-
-            for tag_id in sorted(tags_to_add):
-                tag = self.library.get_tag(tag_id)
-                if tag:
-                    tag_widget = TagWidget(
-                        tag=tag,
-                        has_edit=False,
-                        has_remove=False,
-                        library=self.library,
-                    )
-                    tags_flow_layout.addWidget(tag_widget)
-
-            tags_flow_layout.addStretch()
-            add_layout.addWidget(tags_flow)
-            entry_layout.addWidget(add_container)
+            add_section = self._create_tag_delta_section(tags_to_add, "+ Add:", self.STYLE_ADD)
+            entry_layout.addWidget(add_section)
 
         if tags_to_remove:
-            remove_container = QWidget()
-            remove_layout = QHBoxLayout(remove_container)
-            remove_layout.setContentsMargins(0, 0, 0, 0)
-            remove_layout.setSpacing(4)
-
-            remove_label = QLabel("- Remove:")
-            remove_label.setStyleSheet("color: red; font-weight: bold;")
-            remove_layout.addWidget(remove_label)
-
-            tags_flow = QWidget()
-            tags_flow_layout = QHBoxLayout(tags_flow)
-            tags_flow_layout.setContentsMargins(0, 0, 0, 0)
-            tags_flow_layout.setSpacing(4)
-
-            for tag_id in sorted(tags_to_remove):
-                tag = self.library.get_tag(tag_id)
-                if tag:
-                    tag_widget = TagWidget(
-                        tag=tag,
-                        has_edit=False,
-                        has_remove=False,
-                        library=self.library,
-                    )
-                    tags_flow_layout.addWidget(tag_widget)
-
-            tags_flow_layout.addStretch()
-            remove_layout.addWidget(tags_flow)
-            entry_layout.addWidget(remove_container)
+            remove_section = self._create_tag_delta_section(
+                tags_to_remove, "- Remove:", self.STYLE_REMOVE
+            )
+            entry_layout.addWidget(remove_section)
 
         if not tags_to_add and not tags_to_remove:
             no_change_label = QLabel("No changes")
-            no_change_label.setStyleSheet("color: gray; font-style: italic;")
+            no_change_label.setStyleSheet(self.STYLE_NO_CHANGE)
             entry_layout.addWidget(no_change_label)
 
         return entry_widget

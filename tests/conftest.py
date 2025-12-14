@@ -169,8 +169,12 @@ def qt_driver(library: Library, library_dir: Path):
         driver.main_window.thumb_size = 128
         driver.main_window.thumb_layout = ThumbGridLayout(driver, QScrollArea())
         driver.main_window.menu_bar.autofill_action = Mock()
+        driver.main_window.menu_bar.copy_tags_action = Mock()
+        driver.main_window.menu_bar.paste_tags_action = Mock()
 
         driver.copy_buffer = {"fields": [], "tags": []}
+        driver.tags_clipboard = set()
+        driver.tags_clipboard_source = set()
 
         driver.lib = library
         # TODO - downsize this method and use it

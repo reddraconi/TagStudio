@@ -20,7 +20,7 @@ from argparse import Namespace
 from pathlib import Path
 from queue import Queue
 from shutil import which
-from typing import Generic, TypeVar
+from typing import TypeVar
 from warnings import catch_warnings
 
 import structlog
@@ -44,7 +44,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
 )
-from tagstudio.qt.mixed.paste_tags_dialog import PasteTagsDialog
 
 import tagstudio.qt.resources_rc  # noqa: F401
 from tagstudio.core.constants import TAG_ARCHIVED, TAG_FAVORITE, VERSION, VERSION_BRANCH
@@ -85,6 +84,7 @@ from tagstudio.qt.mixed.fix_unlinked import FixUnlinkedEntriesModal
 from tagstudio.qt.mixed.folders_to_tags import FoldersToTagsModal
 from tagstudio.qt.mixed.item_thumb import BadgeType
 from tagstudio.qt.mixed.migration_modal import JsonMigrationModal
+from tagstudio.qt.mixed.paste_tags_dialog import PasteTagsDialog
 from tagstudio.qt.mixed.progress_bar import ProgressWidget
 from tagstudio.qt.mixed.settings_panel import SettingsPanel
 from tagstudio.qt.mixed.tag_color_manager import TagColorManager
@@ -149,7 +149,7 @@ T = TypeVar("T")
 #                 | A   [B]<- C |
 #                 |[A]<- B    C |  Previous routes still exist
 #                 | A ->[D]     |  Stack is cut from [:A] on new route
-class History(Generic[T]):
+class History[T]:
     __history: list[T]
     __index: int = 0
 
@@ -858,36 +858,31 @@ class QtDriver(DriverMixin, QObject):
         )
         self.modal.show()
 
-    def select_all_action_callback(self):
-        """Set the selection to all visible items."""
-        self.main_window.thumb_layout.select_all()
+    def _update_selection_ui(self, update_preview: bool = True):
+        """Update all UI elements related to selection state.
 
+        Args:
+            update_preview: Whether to update the preview panel (default True)
+        """
         self.set_clipboard_menu_viability()
         self.set_select_actions_visibility()
         self.set_tags_clipboard_menu_viability()
         self.update_paste_tags_context_menu_visibility()
+        self.main_window.preview_panel.set_selection(self.selected, update_preview=update_preview)
 
-        self.main_window.preview_panel.set_selection(self.selected, update_preview=False)
+    def select_all_action_callback(self):
+        """Set the selection to all visible items."""
+        self.main_window.thumb_layout.select_all()
+        self._update_selection_ui(update_preview=False)
 
     def select_inverse_action_callback(self):
         """Invert the selection of all visible items."""
         self.main_window.thumb_layout.select_inverse()
-
-        self.set_clipboard_menu_viability()
-        self.set_select_actions_visibility()
-        self.set_tags_clipboard_menu_viability()
-        self.update_paste_tags_context_menu_visibility()
-
-        self.main_window.preview_panel.set_selection(self.selected, update_preview=False)
+        self._update_selection_ui(update_preview=False)
 
     def clear_select_action_callback(self):
         self.main_window.thumb_layout.clear_selected()
-
-        self.set_select_actions_visibility()
-        self.set_clipboard_menu_viability()
-        self.set_tags_clipboard_menu_viability()
-        self.update_paste_tags_context_menu_visibility()
-        self.main_window.preview_panel.set_selection(self.selected)
+        self._update_selection_ui()
 
     def add_tags_to_selected_callback(self, tag_ids: list[int]):
         selected: list[int] = self.selected
@@ -1044,9 +1039,7 @@ class QtDriver(DriverMixin, QObject):
         pw.update_label(Translations["library.refresh.scanning_preparing"])
         pw.show()
 
-        iterator = FunctionIterator(
-            lambda lib=unwrap(self.lib.library_dir): tracker.refresh_dir(lib)
-        )  # noqa: B008
+        iterator = FunctionIterator(lambda: tracker.refresh_dir(unwrap(self.lib.library_dir)))
         iterator.value.connect(
             lambda x: (
                 pw.update_progress(x + 1),
@@ -1107,7 +1100,7 @@ class QtDriver(DriverMixin, QObject):
                 pw.hide(),
                 pw.deleteLater(),
                 # refresh the library only when new items are added
-                files_count and self.update_browsing_state(),  # type: ignore
+                files_count and self.update_browsing_state(),
             )
         )
         QThreadPool.globalInstance().start(r)
@@ -1296,52 +1289,32 @@ class QtDriver(DriverMixin, QObject):
             self.main_window.thumb_layout.clear_selected()
             self.main_window.thumb_layout.select_entry(item_id)
 
-        self.set_clipboard_menu_viability()
-        self.set_select_actions_visibility()
-        self.set_tags_clipboard_menu_viability()
-        self.update_paste_tags_context_menu_visibility()
-
-        self.main_window.preview_panel.set_selection(self.selected)
+        self._update_selection_ui()
 
     def set_clipboard_menu_viability(self):
-        if len(self.selected) == 1:
-            self.main_window.menu_bar.copy_fields_action.setEnabled(True)
-        else:
-            self.main_window.menu_bar.copy_fields_action.setEnabled(False)
-        if self.selected and (self.copy_buffer["fields"] or self.copy_buffer["tags"]):
-            self.main_window.menu_bar.paste_fields_action.setEnabled(True)
-        else:
-            self.main_window.menu_bar.paste_fields_action.setEnabled(False)
+        self.main_window.menu_bar.copy_fields_action.setEnabled(len(self.selected) == 1)
+        self.main_window.menu_bar.paste_fields_action.setEnabled(
+            bool(self.selected and (self.copy_buffer["fields"] or self.copy_buffer["tags"]))
+        )
 
     def set_select_actions_visibility(self):
         if not self.main_window.menu_bar.add_tag_to_selected_action:
             return
 
-        if self.frame_content:
-            self.main_window.menu_bar.select_all_action.setEnabled(True)
-            self.main_window.menu_bar.select_inverse_action.setEnabled(True)
-        else:
-            self.main_window.menu_bar.select_all_action.setEnabled(False)
-            self.main_window.menu_bar.select_inverse_action.setEnabled(False)
+        has_content = bool(self.frame_content)
+        self.main_window.menu_bar.select_all_action.setEnabled(has_content)
+        self.main_window.menu_bar.select_inverse_action.setEnabled(has_content)
 
-        if self.selected:
-            self.main_window.menu_bar.add_tag_to_selected_action.setEnabled(True)
-            self.main_window.menu_bar.clear_select_action.setEnabled(True)
-            self.main_window.menu_bar.delete_file_action.setEnabled(True)
-        else:
-            self.main_window.menu_bar.add_tag_to_selected_action.setEnabled(False)
-            self.main_window.menu_bar.clear_select_action.setEnabled(False)
-            self.main_window.menu_bar.delete_file_action.setEnabled(False)
+        has_selection = bool(self.selected)
+        self.main_window.menu_bar.add_tag_to_selected_action.setEnabled(has_selection)
+        self.main_window.menu_bar.clear_select_action.setEnabled(has_selection)
+        self.main_window.menu_bar.delete_file_action.setEnabled(has_selection)
 
     def set_tags_clipboard_menu_viability(self):
-        if len(self.selected) >= 1:
-            self.main_window.menu_bar.copy_tags_action.setEnabled(True)
-        else:
-            self.main_window.menu_bar.copy_tags_action.setEnabled(False)
-        if self.selected and self.tags_clipboard:
-            self.main_window.menu_bar.paste_tags_action.setEnabled(True)
-        else:
-            self.main_window.menu_bar.paste_tags_action.setEnabled(False)
+        self.main_window.menu_bar.copy_tags_action.setEnabled(len(self.selected) >= 1)
+        self.main_window.menu_bar.paste_tags_action.setEnabled(
+            bool(self.selected and self.tags_clipboard)
+        )
 
     def update_paste_tags_context_menu_visibility(self):
         for item_thumb in self.main_window.thumb_layout._item_thumbs:
