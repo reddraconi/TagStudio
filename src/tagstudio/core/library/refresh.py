@@ -55,13 +55,24 @@ class RefreshTracker:
         self.files_not_in_library = []
 
     def refresh_folders(self, force_internal_tools: bool = False) -> Iterator[int]:
-        """Scan every Folder registered in the library."""
-        folders: list[Folder] = list(self.library.folders)
-        # Ensure the primary folder is scanned when no Folder rows have been
-        # persisted yet (fresh libraries populate Folder rows lazily via
-        # Entry cascade).
-        if not folders and self.library.folder is not None:
-            folders = [self.library.folder]
+        """Scan every Folder registered in the library, including the primary.
+
+        The primary folder may not yet be present in the `folders` table
+        (open_sqlite_library expunges it before commit, so it only lands on
+        disk later via cascade), so it must be merged in explicitly or it
+        will be silently skipped once any other Folder has been added.
+        """
+        primary = self.library.folder
+        folders: list[Folder] = []
+        seen_paths: set[Path] = set()
+        if primary is not None:
+            folders.append(primary)
+            seen_paths.add(primary.path)
+        for folder in self.library.folders:
+            if folder.path in seen_paths:
+                continue
+            folders.append(folder)
+            seen_paths.add(folder.path)
         for folder in folders:
             yield from self.refresh_dir(folder, force_internal_tools)
 

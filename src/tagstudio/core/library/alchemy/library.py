@@ -244,7 +244,11 @@ class Library:
         """Migrate JSON library data to the SQLite database."""
         logger.info("Starting Library Conversion...")
         start_time = time.time()
-        folder: Folder = Folder(path=self.library_dir, uuid=str(uuid4()))
+        # open_sqlite_library already created and persisted the primary Folder
+        # matching library_dir; creating a second Folder with the same path
+        # here would hit the folders.path unique constraint and silently drop
+        # every Entry during cascade insert.
+        folder: Folder = self.folder or Folder(path=self.library_dir, uuid=str(uuid4()))
 
         # Tags
         for tag in json_lib.tags:
@@ -512,8 +516,11 @@ class Library:
                     uuid=str(uuid4()),
                 )
                 session.add(folder)
-                session.expunge(folder)
                 session.commit()
+                # Detach only AFTER the commit so the row actually lands on
+                # disk; expunging first cancels the pending INSERT.
+                session.refresh(folder)
+                session.expunge(folder)
                 self.folder = folder
 
             # Generate default .ts_ignore file
@@ -914,10 +921,17 @@ class Library:
                 yield entry
                 session.expunge(entry)
 
-    def get_entry_full_by_path(self, path: Path) -> Entry | None:
-        """Get the entry with the corresponding path."""
+    def get_entry_full_by_path(self, path: Path, folder: Folder | None = None) -> Entry | None:
+        """Get the entry with the corresponding relative path.
+
+        When `folder` is provided the lookup is restricted to that Folder,
+        disambiguating multi-folder libraries where two Folders can each
+        hold an entry at the same relative path.
+        """
         with Session(self.engine) as session:
             stmt = select(Entry).where(Entry.path == path)
+            if folder is not None:
+                stmt = stmt.where(Entry.folder_id == folder.id)
             stmt = (
                 stmt.outerjoin(Entry.text_fields)
                 .outerjoin(Entry.datetime_fields)
@@ -1054,6 +1068,29 @@ class Library:
             for folder in folders:
                 session.expunge(folder)
         return folders
+
+    def folder_entry_count(self, folder: Folder) -> int:
+        with Session(self.engine) as session:
+            return session.scalar(
+                select(func.count(Entry.id)).where(Entry.folder_id == folder.id)
+            ) or 0
+
+    def folder_for_path(self, absolute: Path) -> Folder | None:
+        """Return the registered Folder whose root is an ancestor of the given absolute path.
+
+        The primary in-memory `self.folder` is included even when it has not
+        yet been persisted to the `folders` table.
+        """
+        candidates: list[Folder] = list(self.folders)
+        if self.folder is not None and not any(f.id == self.folder.id for f in candidates):
+            candidates.insert(0, self.folder)
+        for folder in candidates:
+            try:
+                absolute.relative_to(folder.path)
+                return folder
+            except ValueError:
+                continue
+        return None
 
     def add_folder(self, path: Path) -> Folder:
         """Register an additional root folder for the Library.

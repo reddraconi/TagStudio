@@ -49,7 +49,7 @@ def test_filepath_setting(qtbot: QtBot, qt_driver: QtDriver, filepath_option: Sh
 
 # Tests to see if the file paths are being displayed correctly
 @pytest.mark.parametrize(
-    "filepath_option, expected_path",
+    ("filepath_option", "expected_path"),
     [
         (
             ShowFilepathOption.SHOW_FULL_PATHS,
@@ -96,6 +96,50 @@ def test_file_path_display(
 
     # Assert the file path is displayed correctly
     assert panel._file_attributes_widget.file_label.text() == file_str  # pyright: ignore[reportPrivateUsage]
+
+
+def test_relative_path_uses_entry_folder_not_library_dir(
+    qt_driver: QtDriver,
+    library: Library,
+    tmp_path: Path,
+):
+    """Regression guard for a bug where SHOW_RELATIVE_PATHS computed the
+    display path against `library.library_dir` for every entry, causing a
+    ValueError whenever the selected entry lived under a secondary folder.
+    The display path must be relative to the entry's OWN folder.
+    """
+    secondary_root = tmp_path / "secondary"
+    secondary_root.mkdir()
+    secondary_folder = library.add_folder(secondary_root)
+    secondary_filepath = secondary_root / "nested" / "thing.png"
+
+    # Register the entry against the secondary folder so folder_for_path
+    # resolves the filepath correctly.
+    library.add_entries([
+        Entry(
+            path=Path("nested/thing.png"),
+            folder=secondary_folder,
+            fields=[],
+        ),
+    ])
+
+    panel = PreviewPanel(library, qt_driver)
+    qt_driver.settings.show_filepath = ShowFilepathOption.SHOW_RELATIVE_PATHS
+
+    # update_stats against an absolute path under the secondary folder must
+    # not raise, and the rendered label must reflect the path relative to
+    # the secondary folder's root ("nested/thing.png"), not something
+    # like `../../../..` relative to library_dir.
+    panel._file_attributes_widget.update_stats(filepath=secondary_filepath)  # pyright: ignore[reportPrivateUsage]
+    rendered = panel._file_attributes_widget.file_label.text()  # pyright: ignore[reportPrivateUsage]
+    # The label inserts zero-width spaces between every character for
+    # styling; strip them before asserting on plain-text content.
+    plain = rendered.replace("\u200b", "")
+    assert "nested" in plain
+    assert "thing.png" in plain
+    # ".." would indicate a (broken) relative_to-library_dir computation
+    # for a foreign-folder path.
+    assert ".." not in plain
 
 
 @pytest.mark.parametrize(

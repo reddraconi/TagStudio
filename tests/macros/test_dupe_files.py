@@ -15,6 +15,7 @@ CWD = Path(__file__).parent
 def test_refresh_dupe_files(library: Library):
     library.library_dir = Path("/tmp/")
     folder = unwrap(library.folder)
+    folder.path = Path("/tmp/")
 
     entry = Entry(
         folder=folder,

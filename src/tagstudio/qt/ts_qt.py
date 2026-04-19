@@ -425,6 +425,11 @@ class QtDriver(DriverMixin, QObject):
             lambda: self.call_if_library_open(self.add_new_files_callback)
         )
 
+        # Manage Folders
+        self.main_window.menu_bar.manage_folders_action.triggered.connect(
+            lambda: self.call_if_library_open(self.manage_folders_callback)
+        )
+
         # Close Library
         self.main_window.menu_bar.close_library_action.triggered.connect(self.close_library)
 
@@ -794,6 +799,7 @@ class QtDriver(DriverMixin, QObject):
             self.main_window.menu_bar.save_library_backup_action.setEnabled(False)
             self.main_window.menu_bar.close_library_action.setEnabled(False)
             self.main_window.menu_bar.refresh_dir_action.setEnabled(False)
+            self.main_window.menu_bar.manage_folders_action.setEnabled(False)
             self.main_window.menu_bar.tag_manager_action.setEnabled(False)
             self.main_window.menu_bar.color_manager_action.setEnabled(False)
             self.main_window.menu_bar.ignore_modal_action.setEnabled(False)
@@ -1027,6 +1033,18 @@ class QtDriver(DriverMixin, QObject):
         msg.setDefaultButton(yes_button)
 
         return msg.exec()
+
+    def manage_folders_callback(self):
+        """Show the Manage Folders modal."""
+        from tagstudio.qt.controllers.manage_folders_modal_controller import ManageFoldersModal
+
+        # Recreate each invocation. Caching the modal survives a library
+        # switch (same self.lib object is reused) but leaves stale Qt
+        # widget state that has caused segfaults under Wayland.
+        self.manage_folders_modal = ManageFoldersModal(self.lib, self)
+        self.manage_folders_modal.show()
+        self.manage_folders_modal.raise_()
+        self.manage_folders_modal.activateWindow()
 
     def add_new_files_callback(self):
         """Run when user initiates adding new files to the Library."""
@@ -1672,6 +1690,7 @@ class QtDriver(DriverMixin, QObject):
         self.main_window.menu_bar.save_library_backup_action.setEnabled(True)
         self.main_window.menu_bar.close_library_action.setEnabled(True)
         self.main_window.menu_bar.refresh_dir_action.setEnabled(True)
+        self.main_window.menu_bar.manage_folders_action.setEnabled(True)
         self.main_window.menu_bar.tag_manager_action.setEnabled(True)
         self.main_window.menu_bar.color_manager_action.setEnabled(True)
         self.main_window.menu_bar.ignore_modal_action.setEnabled(True)

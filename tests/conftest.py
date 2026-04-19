@@ -154,7 +154,12 @@ def entry_full(library: Library):
 
 
 @pytest.fixture
-def qt_driver(library: Library, library_dir: Path):
+def qt_driver(qapp, library: Library, library_dir: Path):  # noqa: ARG001
+    # `qapp` from pytest-qt guarantees a QApplication exists before any
+    # widget (ThumbRenderer, ThumbGridLayout, etc.) is instantiated.
+    # QtDriver.start() would normally create it, but this fixture bypasses
+    # start() and used to segfault because Qt signals were being created
+    # against a non-existent application instance.
     class Args:
         settings_file = library_dir / "settings.toml"
         cache_file = library_dir / "tagstudio.ini"

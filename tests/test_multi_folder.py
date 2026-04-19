@@ -18,6 +18,20 @@ def test_folders_initial(library: Library):
     assert folders[0].path == library.library_dir
 
 
+def test_primary_folder_persisted_on_open(library: Library):
+    """open_library must persist the primary Folder immediately.
+
+    Regression guard for a quirk where session.expunge(folder) was called
+    BEFORE session.commit(), cancelling the pending INSERT. The primary
+    would then only land on disk later via cascade from the first Entry,
+    which silently broke refresh_folders and anything else that depends
+    on lib.folders containing the primary.
+    """
+    assert library.folder is not None
+    persisted = library.folders
+    assert any(f.path == library.folder.path for f in persisted)
+
+
 def test_add_folder(library: Library, tmp_path: Path):
     new_root = tmp_path / "extra"
     new_root.mkdir()
@@ -101,6 +115,51 @@ def test_remove_folder_cascade_deletes_entries(library: Library, tmp_path: Path)
 
     assert library.entries_count == before - 1
     assert all(f.id != folder_id for f in library.folders)
+
+
+def test_folder_for_path_matches_registered_folder(library: Library, tmp_path: Path):
+    extra_root = tmp_path / "other"
+    extra_root.mkdir()
+    extra = library.add_folder(extra_root)
+
+    primary = library.folder
+    assert primary is not None
+
+    primary_match = library.folder_for_path(primary.path / "x.txt")
+    assert primary_match is not None
+    assert primary_match.id == primary.id
+
+    extra_match = library.folder_for_path(extra_root / "y.txt")
+    assert extra_match is not None
+    assert extra_match.id == extra.id
+
+
+def test_folder_for_path_returns_none_when_unregistered(library: Library, tmp_path: Path):
+    unrelated = tmp_path / "not_a_library_folder"
+    unrelated.mkdir()
+    assert library.folder_for_path(unrelated / "foo.txt") is None
+
+
+def test_get_entry_full_by_path_scoped_to_folder(library: Library, tmp_path: Path):
+    """Two folders with same relative path; folder=... disambiguates the lookup."""
+    extra_root = tmp_path / "other"
+    extra_root.mkdir()
+    extra = library.add_folder(extra_root)
+    primary = library.folder
+    assert primary is not None
+
+    library.add_entries([
+        Entry(path=Path("foo.txt"), folder=extra, fields=[], date_added=dt.now()),
+    ])
+
+    # Unscoped lookup returns some match (arbitrary), but both scoped
+    # lookups must return entries whose folder matches the requested scope.
+    primary_entry = library.get_entry_full_by_path(Path("foo.txt"), folder=primary)
+    extra_entry = library.get_entry_full_by_path(Path("foo.txt"), folder=extra)
+    assert primary_entry is not None
+    assert extra_entry is not None
+    assert primary_entry.folder_id != extra_entry.folder_id
+    assert extra_entry.folder_id == extra.id
 
 
 def test_same_relative_path_across_folders(library: Library, tmp_path: Path):

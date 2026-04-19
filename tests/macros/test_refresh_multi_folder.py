@@ -81,6 +81,28 @@ def test_refresh_same_filename_in_two_folders(library: Library, tmp_path: Path):
 
 
 @pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)
+def test_refresh_folders_scans_primary_even_after_add(library: Library, tmp_path: Path):
+    """After add_folder persists a secondary Folder, refresh_folders must
+    still scan the primary. Regression guard for a bug where the primary
+    was silently skipped once any other Folder existed in the folders table."""
+    primary_dir = unwrap(library.library_dir)
+    library.included_files.clear()
+    (primary_dir / "primary_only.txt").touch()
+
+    extra_root = tmp_path / "extra"
+    extra_root.mkdir()
+    (extra_root / "extra_only.txt").touch()
+    library.add_folder(extra_root)
+
+    tracker = RefreshTracker(library=library)
+    list(tracker.refresh_folders(force_internal_tools=True))
+
+    found_paths = {p for _, p in tracker.files_not_in_library}
+    assert Path("primary_only.txt") in found_paths
+    assert Path("extra_only.txt") in found_paths
+
+
+@pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)
 def test_save_new_files_assigns_correct_folder(library: Library, tmp_path: Path):
     """After refresh_folders + save_new_files, entries persist with the right
     folder_id so their absolute_path resolves to the right filesystem location."""

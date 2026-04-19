@@ -42,14 +42,18 @@ class UnlinkedRegistry:
     def match_unlinked_file_entry(self, match_entry: Entry) -> list[Path]:
         """Try and match unlinked file entries with matching results in the library directory.
 
-        Works if files were just moved to different subfolders and don't have duplicate names.
+        Works if files were just moved to different subfolders within the same
+        Folder, and don't have duplicate names.
         """
-        library_dir = unwrap(self.lib.library_dir)
+        # Search within the entry's own Folder; cross-folder moves would
+        # require reassigning the entry which is a different operation.
+        scan_root = match_entry.folder.path
+        ts_root = unwrap(self.lib.library_dir)
         matches: list[Path] = []
 
         # NOTE: ignore_to_glob() is needed for wcmatch, not ripgrep.
-        ignore_patterns = ignore_to_glob(Ignore.get_patterns(library_dir))
-        for path in pathlib.Path(str(library_dir)).glob(
+        ignore_patterns = ignore_to_glob(Ignore.get_patterns(ts_root))
+        for path in pathlib.Path(str(scan_root)).glob(
             f"***/{match_entry.path.name}",
             flags=PATH_GLOB_FLAGS,
             exclude=ignore_patterns,
@@ -57,7 +61,7 @@ class UnlinkedRegistry:
             if path.is_dir():
                 continue
             if path.name == match_entry.path.name:
-                new_path = Path(path).relative_to(library_dir)
+                new_path = Path(path).relative_to(scan_root)
                 matches.append(new_path)
 
         logger.info("[UnlinkedRegistry] Matches", matches=matches)

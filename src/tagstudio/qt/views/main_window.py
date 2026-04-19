@@ -65,6 +65,7 @@ class MainMenuBar(QMenuBar):
     settings_action: QAction
     open_on_start_action: QAction
     refresh_dir_action: QAction
+    manage_folders_action: QAction
     close_library_action: QAction
 
     edit_menu: QMenu
@@ -162,6 +163,11 @@ class MainMenuBar(QMenuBar):
         self.refresh_dir_action.setStatusTip("Ctrl+R")
         self.refresh_dir_action.setEnabled(False)
         self.file_menu.addAction(self.refresh_dir_action)
+
+        # Manage Folders
+        self.manage_folders_action = QAction(Translations["menu.file.manage_folders"], self)
+        self.manage_folders_action.setEnabled(False)
+        self.file_menu.addAction(self.manage_folders_action)
 
         self.file_menu.addSeparator()
 

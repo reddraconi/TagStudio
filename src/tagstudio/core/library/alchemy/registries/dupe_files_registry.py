@@ -28,7 +28,6 @@ class DupeFilesRegistry:
         A duplicate file is defined as an identical or near-identical file as determined
         by a DupeGuru results file.
         """
-        library_dir = unwrap(self.library.library_dir)
         if not isinstance(results_filepath, Path):
             results_filepath = Path(results_filepath)
 
@@ -45,13 +44,15 @@ class DupeFilesRegistry:
                 if element.tag == "file":
                     file_path = Path(unwrap(element.attrib.get("path")))
 
-                    try:
-                        path_relative = file_path.relative_to(library_dir)
-                    except ValueError:
-                        # The file is not in the library directory
+                    owning_folder = self.library.folder_for_path(file_path)
+                    if owning_folder is None:
+                        # The file is not inside any registered Folder.
                         continue
+                    path_relative = file_path.relative_to(owning_folder.path)
 
-                    entry = self.library.get_entry_full_by_path(path_relative)
+                    entry = self.library.get_entry_full_by_path(
+                        path_relative, folder=owning_folder
+                    )
                     if entry is None:
                         # file not in library
                         continue

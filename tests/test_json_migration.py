@@ -12,7 +12,9 @@ from tagstudio.qt.mixed.migration_modal import JsonMigrationModal
 CWD = Path(__file__)
 
 
-def test_json_migration():
+def test_json_migration(qapp):  # noqa: ARG001
+    # qapp (pytest-qt) ensures a QApplication exists before JsonMigrationModal
+    # instantiates Qt widgets.
     modal = JsonMigrationModal(CWD.parent / "fixtures" / "json_library")
     modal.migrate(skip_ui=True)
 
