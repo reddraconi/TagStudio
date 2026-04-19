@@ -34,7 +34,6 @@ from sqlalchemy import (
     create_engine,
     delete,
     desc,
-    exists,
     func,
     inspect,
     or_,
@@ -1113,10 +1112,21 @@ class Library:
             session.delete(managed)
             session.commit()
 
-    def has_path_entry(self, path: Path) -> bool:
-        """Check if item with given path is in library already."""
+    def has_path_entry(self, path: Path, folder: Folder | None = None) -> bool:
+        """Check if an Entry with the given relative path is in the library.
+
+        Args:
+            path: Relative path to look up.
+            folder: If provided, restrict the check to entries belonging to
+                this Folder. Required to disambiguate in multi-folder libraries
+                where two Folders can each hold an entry at the same relative
+                path.
+        """
         with Session(self.engine) as session:
-            return session.query(exists().where(Entry.path == path)).scalar()
+            stmt = select(Entry.id).where(Entry.path == path)
+            if folder is not None:
+                stmt = stmt.where(Entry.folder_id == folder.id)
+            return session.scalar(stmt) is not None
 
     def get_paths(self, limit: int = -1) -> list[str]:
         path_strings: list[str] = []
@@ -1260,14 +1270,22 @@ class Library:
     def update_entry_path(self, entry_id: int | Entry, path: Path) -> bool:
         """Set the path field of an entry.
 
-        Returns True if the action succeeded and False if the path already exists.
+        Returns True if the action succeeded and False if the path already
+        exists within the same Folder as the target entry.
         """
-        if self.has_path_entry(path):
-            return False
-        if isinstance(entry_id, Entry):
-            entry_id = entry_id.id
+        with Session(self.engine, expire_on_commit=False) as session:
+            if isinstance(entry_id, Entry):
+                folder = entry_id.folder
+                entry_id = entry_id.id
+            else:
+                existing = session.scalar(select(Entry).where(Entry.id == entry_id))
+                if existing is None:
+                    return False
+                folder = existing.folder
 
-        with Session(self.engine) as session:
+            if self.has_path_entry(path, folder=folder):
+                return False
+
             update_stmt = (
                 update(Entry)
                 .where(

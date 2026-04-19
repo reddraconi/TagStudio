@@ -4,6 +4,8 @@
 
 
 import shutil
+import sqlite3
+from datetime import datetime as dt
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,7 @@ from tagstudio.core.library.alchemy.constants import (
     SQL_FILENAME,
 )
 from tagstudio.core.library.alchemy.library import Library
+from tagstudio.core.library.alchemy.models import Entry
 
 CWD = Path(__file__)
 FIXTURES = "fixtures"
@@ -52,3 +55,60 @@ def test_library_migrations(path: str):
         library.close()
         shutil.rmtree(temp_path)
         raise (e)
+
+
+def test_db104_migration_preserves_entries(tmp_path: Path):
+    """The v104 entries-table rebuild must preserve every row byte-for-byte.
+
+    A fresh v104 library is populated with entries with distinct paths, a
+    child folder, and a mix of set/unset datetime fields. The schema version
+    is then forced back to 103 to make open_library re-run the v104 rebuild
+    against real data. Every column on every row must survive the rebuild.
+    """
+    ts_dir = tmp_path / TS_FOLDER_NAME
+    ts_dir.mkdir()
+
+    lib = Library()
+    assert lib.open_library(tmp_path).success
+    assert lib.folder is not None
+    primary = lib.folder
+
+    extra_root = tmp_path / "extra"
+    extra_root.mkdir()
+    extra = lib.add_folder(extra_root)
+
+    seed = [
+        Entry(path=Path("a.txt"), folder=primary, fields=[], date_added=dt(2025, 1, 1)),
+        Entry(path=Path("nested/b.md"), folder=primary, fields=[]),
+        Entry(path=Path("a.txt"), folder=extra, fields=[], date_added=dt(2024, 6, 15)),
+    ]
+    lib.add_entries(seed)
+
+    expected = sorted(
+        (e.id, e.folder_id, e.path.as_posix(), e.filename, e.suffix, e.date_added)
+        for e in lib.all_entries()
+    )
+    expected_count = lib.entries_count
+    assert expected_count == 3
+
+    lib.close()
+
+    # Force the stored version back to 103 so the next open triggers the
+    # v104 rebuild against real rows.
+    db_path = tmp_path / TS_FOLDER_NAME / SQL_FILENAME
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE versions SET value = 103 WHERE key = 'CURRENT'")
+        conn.commit()
+
+    lib = Library()
+    assert lib.open_library(tmp_path).success
+    try:
+        assert lib.entries_count == expected_count
+
+        actual = sorted(
+            (e.id, e.folder_id, e.path.as_posix(), e.filename, e.suffix, e.date_added)
+            for e in lib.all_entries()
+        )
+        assert actual == expected
+    finally:
+        lib.close()
