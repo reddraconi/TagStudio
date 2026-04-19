@@ -119,17 +119,19 @@ def library(request, library_dir: Path):  # pyright: ignore
         path=Path("foo.txt"),
         fields=lib.default_fields,
     )
-    assert lib.add_tags_to_entries(entry.id, tag.id)
-
     entry2 = Entry(
         id=2,
         folder=folder,
         path=Path("one/two/bar.md"),
         fields=lib.default_fields,
     )
-    assert lib.add_tags_to_entries(entry2.id, tag2.id)
 
+    # Entries must be persisted BEFORE tag associations so the
+    # tag_entries.entry_id FK references an existing row; v104 enables
+    # SQLite foreign-key enforcement, which rejects otherwise.
     assert lib.add_entries([entry, entry2])
+    assert lib.add_tags_to_entries(entry.id, tag.id)
+    assert lib.add_tags_to_entries(entry2.id, tag2.id)
     assert len(lib.tags) == 6
 
     yield lib

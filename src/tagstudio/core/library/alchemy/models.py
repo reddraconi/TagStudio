@@ -251,6 +251,24 @@ class Entry(Base):
         date_added: dt | None = None,
     ) -> None:
         super().__init__()
+        # Reject paths that would escape the parent Folder's root.
+        #
+        # Each Entry belongs to exactly one Folder row (folder_id FK). Its
+        # `path` column is stored relative to that Folder's root directory,
+        # and Entry.absolute_path composes `folder.path / path`. Python's
+        # Path division does not resolve ".." segments, so a crafted relative
+        # path could let a malicious library entry point at files outside
+        # the Folder it was registered under.
+        if path.is_absolute():
+            raise ValueError(
+                "Entry path must be relative to its parent Folder's root directory "
+                f"(e.g. 'subdir/file.txt'); got absolute path: {path}"
+            )
+        if ".." in path.parts:
+            raise ValueError(
+                "Entry path must not contain '..' segments — they would escape "
+                f"the parent Folder's root directory: {path}"
+            )
         self.path = path
         self.folder = folder
         self.id = id  # pyright: ignore[reportAttributeAccessIssue]

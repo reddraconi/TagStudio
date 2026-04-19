@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import override
 
 import structlog
-from sqlalchemy import Dialect, Engine, String, TypeDecorator, create_engine, text
+from sqlalchemy import Dialect, Engine, String, TypeDecorator, create_engine, event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase
 
@@ -37,8 +37,24 @@ class Base(DeclarativeBase):
     type_annotation_map = {Path: PathType}
 
 
-def make_engine(connection_string: str) -> Engine:
-    return create_engine(connection_string)
+def make_engine(connection_string: str, poolclass: type | None = None) -> Engine:
+    if poolclass is not None:
+        engine = create_engine(connection_string, poolclass=poolclass)
+    else:
+        engine = create_engine(connection_string)
+
+    # SQLite does not enforce foreign-key constraints unless this pragma
+    # is set on each connection. Without it, the ON DELETE CASCADE rules
+    # declared on the entry_id FKs (text_fields, datetime_fields,
+    # boolean_fields, tag_entries) are silently ignored, and bulk
+    # `Query.delete()` statements leave orphan rows.
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _record):  # pyright: ignore[reportUnusedFunction]
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    return engine
 
 
 def make_tables(engine: Engine) -> None:

@@ -31,7 +31,6 @@ from sqlalchemy import (
     ScalarResult,
     and_,
     asc,
-    create_engine,
     delete,
     desc,
     func,
@@ -76,7 +75,7 @@ from tagstudio.core.library.alchemy.constants import (
     SQL_FILENAME,
     TAG_CHILDREN_QUERY,
 )
-from tagstudio.core.library.alchemy.db import make_tables
+from tagstudio.core.library.alchemy.db import make_engine, make_tables
 from tagstudio.core.library.alchemy.enums import (
     MAX_SQL_VARIABLES,
     BrowsingState,
@@ -394,7 +393,7 @@ class Library:
             library_dir=library_dir,
             connection_string=connection_string,
         )
-        self.engine = create_engine(connection_string, poolclass=poolclass)
+        self.engine = make_engine(connection_string, poolclass=poolclass)
         with Session(self.engine) as session:
             # Don't check DB version when creating new library
             if not is_new:
@@ -742,26 +741,88 @@ class Library:
             session.rollback()
 
     def __apply_db104_schema_changes(self, session: Session):
-        """Rebuild entries table to replace UNIQUE(path) with UNIQUE(folder_id, path).
+        """Multi-folder schema bump.
 
-        SQLite has no ALTER TABLE DROP CONSTRAINT, so the standard rebuild pattern
-        (https://www.sqlite.org/lang_altertable.html) is used.
+        Two logical changes ship together at v104:
+
+        1. Rebuild the ``entries`` table so its uniqueness constraint is
+           ``UNIQUE(folder_id, path)`` rather than ``UNIQUE(path)``. Without
+           this, two folders cannot legitimately hold files at the same
+           relative path.
+
+        2. Rebuild the entry-referencing child tables (``text_fields``,
+           ``datetime_fields``, ``boolean_fields``, ``tag_entries``) so their
+           ``entry_id`` foreign keys declare ``ON DELETE CASCADE``. ORM-level
+           ``cascade="all, delete"`` is bypassed by bulk ``Query.delete()``
+           statements (used by ``remove_entries`` and ``remove_folder``),
+           previously leaving orphan rows in the child tables whose
+           ``entry_id`` referenced nothing.
+
+        SQLite has no ``ALTER TABLE DROP CONSTRAINT``, so each table is
+        rebuilt using the standard rename/create/copy/drop pattern
+        (https://www.sqlite.org/lang_altertable.html).
         """
-        create_stmt = text("""
-            CREATE TABLE _entries_new (
-                id INTEGER NOT NULL PRIMARY KEY,
-                folder_id INTEGER NOT NULL,
-                path VARCHAR NOT NULL,
-                filename VARCHAR NOT NULL DEFAULT '',
-                suffix VARCHAR NOT NULL,
-                date_created DATETIME,
-                date_modified DATETIME,
-                date_added DATETIME,
-                FOREIGN KEY(folder_id) REFERENCES folders(id),
-                CONSTRAINT uq_entries_folder_path UNIQUE (folder_id, path)
-            )
-        """)
-        copy_stmt = text("""
+        rebuild_statements = {
+            "entries": """
+                CREATE TABLE _entries_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    folder_id INTEGER NOT NULL,
+                    path VARCHAR NOT NULL,
+                    filename VARCHAR NOT NULL DEFAULT '',
+                    suffix VARCHAR NOT NULL,
+                    date_created DATETIME,
+                    date_modified DATETIME,
+                    date_added DATETIME,
+                    FOREIGN KEY(folder_id) REFERENCES folders(id),
+                    CONSTRAINT uq_entries_folder_path UNIQUE (folder_id, path)
+                )
+            """,
+            "text_fields": """
+                CREATE TABLE _text_fields_new (
+                    value VARCHAR,
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    type_key VARCHAR NOT NULL,
+                    entry_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    FOREIGN KEY(type_key) REFERENCES value_type("key"),
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                )
+            """,
+            "datetime_fields": """
+                CREATE TABLE _datetime_fields_new (
+                    value VARCHAR,
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    type_key VARCHAR NOT NULL,
+                    entry_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    FOREIGN KEY(type_key) REFERENCES value_type("key"),
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                )
+            """,
+            "boolean_fields": """
+                CREATE TABLE _boolean_fields_new (
+                    value BOOLEAN NOT NULL,
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    type_key VARCHAR NOT NULL,
+                    entry_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    FOREIGN KEY(type_key) REFERENCES value_type("key"),
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                )
+            """,
+            "tag_entries": """
+                CREATE TABLE _tag_entries_new (
+                    tag_id INTEGER NOT NULL,
+                    entry_id INTEGER NOT NULL,
+                    PRIMARY KEY (tag_id, entry_id),
+                    FOREIGN KEY(tag_id) REFERENCES tags(id),
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                )
+            """,
+        }
+        # entries must come first so the renamed FK targets referenced by the
+        # child-table rebuilds already exist.
+        entries_copy_stmt = text("""
             INSERT INTO _entries_new
             (id, folder_id, path, filename, suffix, date_created, date_modified, date_added)
             SELECT id, folder_id, path, filename, suffix, date_created, date_modified, date_added
@@ -770,18 +831,26 @@ class Library:
         try:
             conn = session.connection()
             conn.execute(text("PRAGMA foreign_keys = OFF"))
-            conn.execute(create_stmt)
-            conn.execute(copy_stmt)
-            conn.execute(text("DROP TABLE entries"))
-            conn.execute(text("ALTER TABLE _entries_new RENAME TO entries"))
+            for table, create_ddl in rebuild_statements.items():
+                new_name = f"_{table}_new"
+                conn.execute(text(create_ddl))
+                if table == "entries":
+                    conn.execute(entries_copy_stmt)
+                else:
+                    conn.execute(
+                        text(f"INSERT INTO {new_name} SELECT * FROM {table}")
+                    )
+                conn.execute(text(f"DROP TABLE {table}"))
+                conn.execute(text(f"ALTER TABLE {new_name} RENAME TO {table}"))
             conn.execute(text("PRAGMA foreign_keys = ON"))
             session.commit()
             logger.info(
-                "[Library][Migration] Rebuilt entries table with UNIQUE(folder_id, path)"
+                "[Library][Migration] Rebuilt entries + child tables "
+                "with composite UNIQUE and ON DELETE CASCADE"
             )
         except Exception as e:
             logger.error(
-                "[Library][Migration] Could not rebuild entries table!",
+                "[Library][Migration] Could not rebuild v104 tables!",
                 error=e,
             )
             session.rollback()
@@ -1041,9 +1110,9 @@ class Library:
             try:
                 session.add_all(items)
                 session.commit()
-            except IntegrityError:
+            except IntegrityError as e:
                 session.rollback()
-                logger.error("IntegrityError")
+                logger.error("[Library] add_entries IntegrityError", error=e)
                 return []
 
             new_ids = [item.id for item in items]

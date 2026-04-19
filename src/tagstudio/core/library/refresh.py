@@ -134,20 +134,21 @@ class RefreshTracker:
             with open(compiled_ignore_path, "w") as pattern_file:
                 pattern_file.write("\n".join(ignore_patterns))
 
+            # Arguments passed as a list with shell=False so user-controlled
+            # path segments (scan_root, compiled_ignore_path) cannot be
+            # interpreted as shell syntax (backticks, $(...), quote-escape, etc.).
             result = silent_run(
-                " ".join(
-                    [
-                        "rg",
-                        "--files",
-                        "--follow",
-                        "--hidden",
-                        "--ignore-file",
-                        f'"{str(compiled_ignore_path)}"',
-                    ]
-                ),
+                [
+                    "rg",
+                    "--files",
+                    "--follow",
+                    "--hidden",
+                    "--ignore-file",
+                    str(compiled_ignore_path),
+                ],
                 cwd=scan_root,
                 capture_output=True,
-                shell=True,
+                shell=False,
                 encoding="UTF-8",
             )
             compiled_ignore_path.unlink()

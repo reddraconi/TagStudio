@@ -105,6 +105,86 @@ def test_add_folder_descendant_of_existing_rejected(library: Library, tmp_path: 
         library.add_folder(child)
 
 
+def test_remove_folder_cascade_leaves_no_orphans(library: Library, tmp_path: Path):
+    """remove_folder(delete_entries=True) must not leave orphan rows in
+    text_fields / datetime_fields / boolean_fields / tag_entries.
+
+    Regression guard for the class of bug where SQLAlchemy ORM-level
+    cascades were bypassed by bulk Query.delete(). v104 adds ON DELETE
+    CASCADE at the DB level so the child rows are cleaned up regardless.
+    """
+    from sqlalchemy import text as sql_text
+    from sqlalchemy.orm import Session
+
+    from tagstudio.core.library.alchemy.fields import TextField
+
+    extra_root = tmp_path / "cascade_test"
+    extra_root.mkdir()
+    folder = library.add_folder(extra_root)
+
+    entry = Entry(path=Path("a.txt"), folder=folder, fields=[], date_added=dt.now())
+    library.add_entries([entry])
+
+    # Attach a text field directly so the orphan-prone relationship is
+    # actually populated.
+    with Session(library.engine) as session:
+        persisted = next(
+            iter(session.scalars(
+                sql_text("SELECT * FROM entries WHERE folder_id = :fid").bindparams(
+                    fid=folder.id
+                )
+            ))
+        )
+        tf = TextField(type_key="TITLE", position=0, value="hello")
+        tf.entry_id = persisted
+        session.add(tf)
+        session.commit()
+
+    library.remove_folder(folder, delete_entries=True)
+
+    # No child rows may reference a deleted entry.
+    with Session(library.engine) as session:
+        for child_table in (
+            "text_fields",
+            "datetime_fields",
+            "boolean_fields",
+            "tag_entries",
+        ):
+            orphan_count = session.scalar(
+                sql_text(
+                    f"SELECT COUNT(*) FROM {child_table} "
+                    "WHERE entry_id NOT IN (SELECT id FROM entries)"
+                )
+            )
+            assert orphan_count == 0, (
+                f"{child_table} retained {orphan_count} rows pointing at deleted entries"
+            )
+
+
+def test_entry_rejects_absolute_path(library: Library, tmp_path: Path):
+    """An absolute path on an Entry is nonsensical — Entry.path is always
+    relative to the parent Folder's root. Accepting an absolute path would
+    make Entry.absolute_path silently discard the Folder and read files
+    outside the library. Reject at construction time."""
+    folder = library.folder
+    assert folder is not None
+    with pytest.raises(ValueError, match="relative to its parent Folder"):
+        Entry(path=Path("/etc/passwd"), folder=folder, fields=[])
+
+
+def test_entry_rejects_parent_traversal(library: Library, tmp_path: Path):
+    """A relative path with '..' segments lets Entry.absolute_path escape
+    the parent Folder's root (Python's Path division does not normalize),
+    which would let a crafted library DB read arbitrary files on the host
+    filesystem."""
+    folder = library.folder
+    assert folder is not None
+    with pytest.raises(ValueError, match="must not contain '..'"):
+        Entry(path=Path("../../etc/passwd"), folder=folder, fields=[])
+    with pytest.raises(ValueError, match="must not contain '..'"):
+        Entry(path=Path("subdir/../../../etc/passwd"), folder=folder, fields=[])
+
+
 def test_add_folder_sibling_accepted(library: Library, tmp_path: Path):
     first = tmp_path / "a"
     first.mkdir()

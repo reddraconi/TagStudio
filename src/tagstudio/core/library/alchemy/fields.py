@@ -36,7 +36,7 @@ class BaseField(Base):
 
     @declared_attr
     def entry_id(self) -> Mapped[int]:
-        return mapped_column(ForeignKey("entries.id"))
+        return mapped_column(ForeignKey("entries.id", ondelete="CASCADE"))
 
     @declared_attr
     def entry(self) -> Mapped[Entry]:

@@ -20,4 +20,6 @@ class TagEntry(Base):
     __tablename__ = "tag_entries"
 
     tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id"), primary_key=True)
-    entry_id: Mapped[int] = mapped_column(ForeignKey("entries.id"), primary_key=True)
+    entry_id: Mapped[int] = mapped_column(
+        ForeignKey("entries.id", ondelete="CASCADE"), primary_key=True
+    )
