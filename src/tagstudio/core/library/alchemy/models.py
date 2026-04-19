@@ -6,7 +6,7 @@ from datetime import datetime as dt
 from pathlib import Path
 from typing import override
 
-from sqlalchemy import JSON, ForeignKey, ForeignKeyConstraint, Integer, event
+from sqlalchemy import JSON, ForeignKey, ForeignKeyConstraint, Integer, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing_extensions import deprecated
 
@@ -195,13 +195,14 @@ class Folder(Base):
 
 class Entry(Base):
     __tablename__ = "entries"
+    __table_args__ = (UniqueConstraint("folder_id", "path", name="uq_entries_folder_path"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
     folder_id: Mapped[int] = mapped_column(ForeignKey("folders.id"))
-    folder: Mapped[Folder] = relationship("Folder")
+    folder: Mapped[Folder] = relationship("Folder", lazy="joined")
 
-    path: Mapped[Path] = mapped_column(PathType, unique=True)
+    path: Mapped[Path] = mapped_column(PathType)
     filename: Mapped[str] = mapped_column()
     suffix: Mapped[str] = mapped_column()
     date_created: Mapped[dt | None]

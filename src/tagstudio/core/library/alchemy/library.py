@@ -543,6 +543,8 @@ class Library:
                     self.__apply_db9_schema_changes(session)
                 if loaded_db_version < 103:
                     self.__apply_db103_schema_changes(session)
+                if loaded_db_version < 104:
+                    self.__apply_db104_schema_changes(session)
                 if loaded_db_version == 6:
                     self.__apply_repairs_for_db6(session)
 
@@ -729,6 +731,51 @@ class Library:
         except Exception as e:
             logger.error(
                 "[Library][Migration] Could not update archived tag to be hidden!",
+                error=e,
+            )
+            session.rollback()
+
+    def __apply_db104_schema_changes(self, session: Session):
+        """Rebuild entries table to replace UNIQUE(path) with UNIQUE(folder_id, path).
+
+        SQLite has no ALTER TABLE DROP CONSTRAINT, so the standard rebuild pattern
+        (https://www.sqlite.org/lang_altertable.html) is used.
+        """
+        create_stmt = text("""
+            CREATE TABLE _entries_new (
+                id INTEGER NOT NULL PRIMARY KEY,
+                folder_id INTEGER NOT NULL,
+                path VARCHAR NOT NULL,
+                filename VARCHAR NOT NULL DEFAULT '',
+                suffix VARCHAR NOT NULL,
+                date_created DATETIME,
+                date_modified DATETIME,
+                date_added DATETIME,
+                FOREIGN KEY(folder_id) REFERENCES folders(id),
+                CONSTRAINT uq_entries_folder_path UNIQUE (folder_id, path)
+            )
+        """)
+        copy_stmt = text("""
+            INSERT INTO _entries_new
+            (id, folder_id, path, filename, suffix, date_created, date_modified, date_added)
+            SELECT id, folder_id, path, filename, suffix, date_created, date_modified, date_added
+            FROM entries
+        """)
+        try:
+            conn = session.connection()
+            conn.execute(text("PRAGMA foreign_keys = OFF"))
+            conn.execute(create_stmt)
+            conn.execute(copy_stmt)
+            conn.execute(text("DROP TABLE entries"))
+            conn.execute(text("ALTER TABLE _entries_new RENAME TO entries"))
+            conn.execute(text("PRAGMA foreign_keys = ON"))
+            session.commit()
+            logger.info(
+                "[Library][Migration] Rebuilt entries table with UNIQUE(folder_id, path)"
+            )
+        except Exception as e:
+            logger.error(
+                "[Library][Migration] Could not rebuild entries table!",
                 error=e,
             )
             session.rollback()
@@ -999,6 +1046,71 @@ class Library:
                 for i in range(0, len(entry_ids), MAX_SQL_VARIABLES)
             ]:
                 session.query(Entry).where(Entry.id.in_(sub_list)).delete()
+            session.commit()
+
+    @property
+    def folders(self) -> list[Folder]:
+        with Session(self.engine, expire_on_commit=False) as session:
+            folders = list(session.scalars(select(Folder)))
+            for folder in folders:
+                session.expunge(folder)
+        return folders
+
+    def add_folder(self, path: Path) -> Folder:
+        """Register an additional root folder for the Library.
+
+        Raises:
+            ValueError: If the path does not exist, is not a directory, or is
+                already registered as a Folder in this Library.
+        """
+        if not path.exists():
+            raise ValueError(f"Path does not exist: {path}")
+        if not path.is_dir():
+            raise ValueError(f"Path is not a directory: {path}")
+
+        with Session(self.engine, expire_on_commit=False) as session:
+            if session.scalar(select(Folder).where(Folder.path == path)):
+                raise ValueError(f"Folder already registered: {path}")
+
+            folder = Folder(path=path, uuid=str(uuid4()))
+            session.add(folder)
+            session.commit()
+            session.expunge(folder)
+        return folder
+
+    def remove_folder(self, folder: Folder, delete_entries: bool = False) -> None:
+        """Unregister a Folder from the Library.
+
+        The primary folder (matching `library_dir`) cannot be removed.
+
+        Args:
+            folder: The Folder to remove.
+            delete_entries: If True, also delete every Entry belonging to the
+                Folder. If False, the call fails when the Folder still has
+                Entries attached.
+
+        Raises:
+            ValueError: If the target is the primary folder, or if the Folder
+                still has Entries and `delete_entries` is False.
+        """
+        with Session(self.engine, expire_on_commit=False) as session:
+            # Merge tolerates a detached or expired Folder instance.
+            managed = session.merge(folder, load=True)
+
+            if self.library_dir is not None and managed.path == self.library_dir:
+                raise ValueError("Cannot remove the primary library folder.")
+
+            entry_count = session.scalar(
+                select(func.count(Entry.id)).where(Entry.folder_id == managed.id)
+            )
+            if entry_count and not delete_entries:
+                raise ValueError(
+                    f"Folder has {entry_count} entries; "
+                    "pass delete_entries=True to remove them."
+                )
+            if entry_count:
+                session.query(Entry).where(Entry.folder_id == managed.id).delete()
+            session.delete(managed)
             session.commit()
 
     def has_path_entry(self, path: Path) -> bool:
