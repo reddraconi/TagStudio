@@ -228,6 +228,10 @@ class Entry(Base):
         return fields
 
     @property
+    def absolute_path(self) -> Path:
+        return self.folder.path / self.path
+
+    @property
     def is_favorite(self) -> bool:
         return any(tag.id == TAG_FAVORITE for tag in self.tags)
 

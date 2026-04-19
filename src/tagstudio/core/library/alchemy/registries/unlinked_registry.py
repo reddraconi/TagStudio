@@ -34,7 +34,7 @@ class UnlinkedRegistry:
 
         self.unlinked_entries = []
         for i, entry in enumerate(self.lib.all_entries()):
-            full_path = unwrap(self.lib.library_dir) / entry.path
+            full_path = entry.absolute_path
             if not full_path.exists() or not full_path.is_file():
                 self.unlinked_entries.append(entry)
             yield i
