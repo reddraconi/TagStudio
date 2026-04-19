@@ -65,11 +65,14 @@ def test_db104_migration_preserves_entries(tmp_path: Path):
     is then forced back to 103 to make open_library re-run the v104 rebuild
     against real data. Every column on every row must survive the rebuild.
     """
-    ts_dir = tmp_path / TS_FOLDER_NAME
-    ts_dir.mkdir()
+    # Use sibling dirs so the extra folder is not nested inside library_dir
+    # (add_folder rejects ancestor/descendant overlaps).
+    library_dir = tmp_path / "library"
+    library_dir.mkdir()
+    (library_dir / TS_FOLDER_NAME).mkdir()
 
     lib = Library()
-    assert lib.open_library(tmp_path).success
+    assert lib.open_library(library_dir).success
     assert lib.folder is not None
     primary = lib.folder
 
@@ -95,13 +98,13 @@ def test_db104_migration_preserves_entries(tmp_path: Path):
 
     # Force the stored version back to 103 so the next open triggers the
     # v104 rebuild against real rows.
-    db_path = tmp_path / TS_FOLDER_NAME / SQL_FILENAME
+    db_path = library_dir / TS_FOLDER_NAME / SQL_FILENAME
     with sqlite3.connect(db_path) as conn:
         conn.execute("UPDATE versions SET value = 103 WHERE key = 'CURRENT'")
         conn.commit()
 
     lib = Library()
-    assert lib.open_library(tmp_path).success
+    assert lib.open_library(library_dir).success
     try:
         assert lib.entries_count == expected_count
 

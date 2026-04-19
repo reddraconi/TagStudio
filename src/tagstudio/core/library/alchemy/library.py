@@ -1095,20 +1095,41 @@ class Library:
     def add_folder(self, path: Path) -> Folder:
         """Register an additional root folder for the Library.
 
+        The path is resolved to its canonical form (symlinks followed,
+        redundant components collapsed) before any checks or storage, so
+        two syntactically-different paths that refer to the same directory
+        are treated as the same folder.
+
         Raises:
-            ValueError: If the path does not exist, is not a directory, or is
-                already registered as a Folder in this Library.
+            ValueError: If the path does not exist, is not a directory, is
+                already registered, or would overlap (be an ancestor or
+                descendant of) an already-registered Folder. Overlap is
+                rejected because a descendant would double-scan files and
+                an ancestor would collide with relative paths stored
+                against the nested folder.
         """
         if not path.exists():
             raise ValueError(f"Path does not exist: {path}")
         if not path.is_dir():
             raise ValueError(f"Path is not a directory: {path}")
 
-        with Session(self.engine, expire_on_commit=False) as session:
-            if session.scalar(select(Folder).where(Folder.path == path)):
-                raise ValueError(f"Folder already registered: {path}")
+        resolved = path.resolve(strict=True)
 
-            folder = Folder(path=path, uuid=str(uuid4()))
+        for existing in self.folders:
+            existing_path = existing.path
+            if resolved == existing_path:
+                raise ValueError(f"Folder already registered: {existing_path}")
+            if resolved.is_relative_to(existing_path):
+                raise ValueError(
+                    f"Path is inside an already-registered folder: {existing_path}"
+                )
+            if existing_path.is_relative_to(resolved):
+                raise ValueError(
+                    f"Path contains an already-registered folder: {existing_path}"
+                )
+
+        with Session(self.engine, expire_on_commit=False) as session:
+            folder = Folder(path=resolved, uuid=str(uuid4()))
             session.add(folder)
             session.commit()
             session.expunge(folder)

@@ -64,6 +64,58 @@ def test_add_folder_duplicate(library: Library, tmp_path: Path):
         library.add_folder(new_root)
 
 
+def test_add_folder_trailing_slash_same_as_no_slash(library: Library, tmp_path: Path):
+    """Path('/foo/') and Path('/foo') are equal after Python's own
+    normalization, so the second add must be rejected as duplicate."""
+    target = tmp_path / "with_slash"
+    target.mkdir()
+    library.add_folder(target)
+    with pytest.raises(ValueError, match="already registered"):
+        library.add_folder(Path(str(target) + "/"))
+
+
+def test_add_folder_symlink_resolves_to_existing(library: Library, tmp_path: Path):
+    """Adding a symlink that points at an already-registered folder must
+    be rejected as duplicate — resolved paths are what's compared."""
+    target = tmp_path / "real_target"
+    target.mkdir()
+    library.add_folder(target)
+
+    link = tmp_path / "link_to_target"
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match="already registered"):
+        library.add_folder(link)
+
+
+def test_add_folder_ancestor_of_existing_rejected(library: Library, tmp_path: Path):
+    child = tmp_path / "parent" / "child"
+    child.mkdir(parents=True)
+    library.add_folder(child)
+    with pytest.raises(ValueError, match="contains an already-registered folder"):
+        library.add_folder(tmp_path / "parent")
+
+
+def test_add_folder_descendant_of_existing_rejected(library: Library, tmp_path: Path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    library.add_folder(parent)
+    child = parent / "child"
+    child.mkdir()
+    with pytest.raises(ValueError, match="inside an already-registered folder"):
+        library.add_folder(child)
+
+
+def test_add_folder_sibling_accepted(library: Library, tmp_path: Path):
+    first = tmp_path / "a"
+    first.mkdir()
+    second = tmp_path / "b"
+    second.mkdir()
+    library.add_folder(first)
+    # Unrelated sibling directory should add cleanly with no overlap.
+    added = library.add_folder(second)
+    assert added.path == second.resolve()
+
+
 def test_remove_primary_folder_rejected(library: Library):
     primary = library.folders[0]
     with pytest.raises(ValueError, match="primary"):
