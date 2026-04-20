@@ -1141,6 +1141,7 @@ class Library:
 
     @property
     def folders(self) -> list[Folder]:
+        """Return every Folder persisted in the library's ``folders`` table."""
         with Session(self.engine, expire_on_commit=False) as session:
             folders = list(session.scalars(select(Folder)))
             for folder in folders:
@@ -1148,6 +1149,7 @@ class Library:
         return folders
 
     def folder_entry_count(self, folder: Folder) -> int:
+        """Count Entry rows attached to the given Folder."""
         with Session(self.engine) as session:
             return (
                 session.scalar(select(func.count(Entry.id)).where(Entry.folder_id == folder.id))
