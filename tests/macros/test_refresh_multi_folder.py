@@ -103,6 +103,67 @@ def test_refresh_folders_scans_primary_even_after_add(library: Library, tmp_path
 
 
 @pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)
+def test_refresh_folders_skips_missing_folder_path(
+    library: Library, tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    """refresh_folders must not abort the whole refresh when a registered
+    folder's on-disk path has disappeared (unmounted volume, externally-
+    deleted directory, or malicious DB pointing at a nonexistent path).
+
+    Regression guard for a FileNotFoundError surfacing out of the
+    background scanner thread when subprocess.run is handed a dead cwd.
+    """
+    primary_dir = unwrap(library.library_dir)
+    library.included_files.clear()
+    (primary_dir / "primary.txt").touch()
+
+    ghost_root = tmp_path / "ghost"
+    ghost_root.mkdir()
+    library.add_folder(ghost_root)
+    # Now yank the folder out from under the library.
+    ghost_root.rmdir()
+
+    tracker = RefreshTracker(library=library)
+    # Must not raise despite ghost_root being gone.
+    list(tracker.refresh_folders(force_internal_tools=True))
+
+    # The primary folder's file is still discovered.
+    found = {p for _, p in tracker.files_not_in_library}
+    assert Path("primary.txt") in found
+
+
+@pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)
+def test_compiled_ignore_cleaned_up_on_scan_error(
+    library: Library, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The temp .compiled_ignore file must be removed even when silent_run
+    raises, so it does not linger in the library's .TagStudio directory."""
+    import shutil as shutil_mod
+
+    import tagstudio.core.library.refresh as refresh_mod
+
+    ts_root = unwrap(library.library_dir)
+    (ts_root / ".TagStudio").mkdir(exist_ok=True)
+    compiled_path = ts_root / ".TagStudio" / ".compiled_ignore"
+
+    # Ensure rg is "found" and that silent_run blows up mid-call.
+    monkeypatch.setattr(shutil_mod, "which", lambda _: "/usr/bin/rg")
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("scan blew up")
+
+    monkeypatch.setattr(refresh_mod, "silent_run", boom)
+
+    tracker = RefreshTracker(library=library)
+    with pytest.raises(RuntimeError, match="scan blew up"):
+        list(tracker.refresh_folders(force_internal_tools=False))
+
+    assert not compiled_path.exists(), (
+        "compiled_ignore temp file leaked when silent_run raised"
+    )
+
+
+@pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)
 def test_save_new_files_assigns_correct_folder(library: Library, tmp_path: Path):
     """After refresh_folders + save_new_files, entries persist with the right
     folder_id so their absolute_path resolves to the right filesystem location."""

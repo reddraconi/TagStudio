@@ -74,6 +74,17 @@ class RefreshTracker:
             folders.append(folder)
             seen_paths.add(folder.path)
         for folder in folders:
+            # Skip folders whose on-disk root has disappeared (unmounted
+            # volume, externally-deleted directory, or a malicious library
+            # DB with a fictitious Folder.path). Without this guard the
+            # scanner's subprocess call would raise FileNotFoundError on
+            # cwd=folder.path and abort the entire refresh.
+            if not folder.path.is_dir():
+                logger.warning(
+                    "[Refresh] Skipping folder whose path is not a directory",
+                    path=folder.path,
+                )
+                continue
             yield from self.refresh_dir(folder, force_internal_tools)
 
     def refresh_dir(
@@ -137,21 +148,26 @@ class RefreshTracker:
             # Arguments passed as a list with shell=False so user-controlled
             # path segments (scan_root, compiled_ignore_path) cannot be
             # interpreted as shell syntax (backticks, $(...), quote-escape, etc.).
-            result = silent_run(
-                [
-                    "rg",
-                    "--files",
-                    "--follow",
-                    "--hidden",
-                    "--ignore-file",
-                    str(compiled_ignore_path),
-                ],
-                cwd=scan_root,
-                capture_output=True,
-                shell=False,
-                encoding="UTF-8",
-            )
-            compiled_ignore_path.unlink()
+            # The try/finally ensures the temp pattern file is removed even if
+            # silent_run raises (e.g. scan_root disappeared between check and
+            # use), so it does not linger inside the library's .TagStudio dir.
+            try:
+                result = silent_run(
+                    [
+                        "rg",
+                        "--files",
+                        "--follow",
+                        "--hidden",
+                        "--ignore-file",
+                        str(compiled_ignore_path),
+                    ],
+                    cwd=scan_root,
+                    capture_output=True,
+                    shell=False,
+                    encoding="UTF-8",
+                )
+            finally:
+                compiled_ignore_path.unlink(missing_ok=True)
 
             if result.stderr:
                 logger.error(result.stderr)
