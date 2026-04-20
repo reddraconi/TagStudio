@@ -828,9 +828,15 @@ class Library:
             SELECT id, folder_id, path, filename, suffix, date_created, date_modified, date_added
             FROM entries
         """)
+        conn = session.connection()
+        # PRAGMA foreign_keys is per-connection, not transactional: a
+        # session.rollback() undoes the DDL but does NOT restore the pragma.
+        # The inner try/finally ensures foreign_keys is re-enabled on the
+        # same live connection before commit/rollback invalidates it, so
+        # the remainder of this connection's life keeps FK enforcement on.
+        conn.execute(text("PRAGMA foreign_keys = OFF"))
+        rebuild_error: Exception | None = None
         try:
-            conn = session.connection()
-            conn.execute(text("PRAGMA foreign_keys = OFF"))
             for table, create_ddl in rebuild_statements.items():
                 new_name = f"_{table}_new"
                 conn.execute(text(create_ddl))
@@ -842,16 +848,21 @@ class Library:
                     )
                 conn.execute(text(f"DROP TABLE {table}"))
                 conn.execute(text(f"ALTER TABLE {new_name} RENAME TO {table}"))
+        except Exception as e:
+            rebuild_error = e
+        finally:
             conn.execute(text("PRAGMA foreign_keys = ON"))
+
+        if rebuild_error is None:
             session.commit()
             logger.info(
                 "[Library][Migration] Rebuilt entries + child tables "
                 "with composite UNIQUE and ON DELETE CASCADE"
             )
-        except Exception as e:
+        else:
             logger.error(
                 "[Library][Migration] Could not rebuild v104 tables!",
-                error=e,
+                error=rebuild_error,
             )
             session.rollback()
 

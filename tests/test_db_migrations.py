@@ -87,18 +87,49 @@ def test_db104_migration_preserves_entries(tmp_path: Path):
     ]
     lib.add_entries(seed)
 
-    expected = sorted(
+    expected_entries = sorted(
         (e.id, e.folder_id, e.path.as_posix(), e.filename, e.suffix, e.date_added)
         for e in lib.all_entries()
     )
     expected_count = lib.entries_count
     assert expected_count == 3
 
+    # Seed child tables so the rebuild's INSERT ... SELECT on
+    # text_fields / datetime_fields / tag_entries is exercised against
+    # real data. If a future edit to the rebuild loop drops or reorders
+    # a column, this snapshot will catch it.
+    db_path = library_dir / TS_FOLDER_NAME / SQL_FILENAME
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO text_fields (value, id, type_key, entry_id, position) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("hello", 1, "TITLE", 1, 0),
+        )
+        conn.execute(
+            "INSERT INTO datetime_fields (value, id, type_key, entry_id, position) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("2024-06-15T00:00:00", 1, "DATE_TAKEN", 3, 0),
+        )
+        conn.execute(
+            "INSERT INTO tag_entries (tag_id, entry_id) VALUES (?, ?)",
+            (1000, 1),
+        )
+        conn.commit()
+
+    def _snapshot(c: sqlite3.Connection, table: str) -> list[tuple]:
+        columns = [r[1] for r in c.execute(f"PRAGMA table_info({table})")]
+        col_list = ", ".join(columns)
+        return sorted(c.execute(f"SELECT {col_list} FROM {table}").fetchall())
+
+    with sqlite3.connect(db_path) as conn:
+        expected_text_fields = _snapshot(conn, "text_fields")
+        expected_datetime_fields = _snapshot(conn, "datetime_fields")
+        expected_tag_entries = _snapshot(conn, "tag_entries")
+
     lib.close()
 
     # Force the stored version back to 103 so the next open triggers the
     # v104 rebuild against real rows.
-    db_path = library_dir / TS_FOLDER_NAME / SQL_FILENAME
     with sqlite3.connect(db_path) as conn:
         conn.execute("UPDATE versions SET value = 103 WHERE key = 'CURRENT'")
         conn.commit()
@@ -108,10 +139,15 @@ def test_db104_migration_preserves_entries(tmp_path: Path):
     try:
         assert lib.entries_count == expected_count
 
-        actual = sorted(
+        actual_entries = sorted(
             (e.id, e.folder_id, e.path.as_posix(), e.filename, e.suffix, e.date_added)
             for e in lib.all_entries()
         )
-        assert actual == expected
+        assert actual_entries == expected_entries
+
+        with sqlite3.connect(db_path) as conn:
+            assert _snapshot(conn, "text_fields") == expected_text_fields
+            assert _snapshot(conn, "datetime_fields") == expected_datetime_fields
+            assert _snapshot(conn, "tag_entries") == expected_tag_entries
     finally:
         lib.close()
