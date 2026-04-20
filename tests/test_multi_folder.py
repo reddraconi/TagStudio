@@ -129,11 +129,13 @@ def test_remove_folder_cascade_leaves_no_orphans(library: Library, tmp_path: Pat
     # actually populated.
     with Session(library.engine) as session:
         persisted = next(
-            iter(session.scalars(
-                sql_text("SELECT * FROM entries WHERE folder_id = :fid").bindparams(
-                    fid=folder.id
+            iter(
+                session.scalars(
+                    sql_text("SELECT * FROM entries WHERE folder_id = :fid").bindparams(
+                        fid=folder.id
+                    )
                 )
-            ))
+            )
         )
         tf = TextField(type_key="TITLE", position=0, value="hello")
         tf.entry_id = persisted
@@ -280,9 +282,11 @@ def test_get_entry_full_by_path_scoped_to_folder(library: Library, tmp_path: Pat
     primary = library.folder
     assert primary is not None
 
-    library.add_entries([
-        Entry(path=Path("foo.txt"), folder=extra, fields=[], date_added=dt.now()),
-    ])
+    library.add_entries(
+        [
+            Entry(path=Path("foo.txt"), folder=extra, fields=[], date_added=dt.now()),
+        ]
+    )
 
     # Unscoped lookup returns some match (arbitrary), but both scoped
     # lookups must return entries whose folder matches the requested scope.

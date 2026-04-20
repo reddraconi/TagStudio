@@ -50,9 +50,7 @@ class DupeFilesRegistry:
                         continue
                     path_relative = file_path.relative_to(owning_folder.path)
 
-                    entry = self.library.get_entry_full_by_path(
-                        path_relative, folder=owning_folder
-                    )
+                    entry = self.library.get_entry_full_by_path(path_relative, folder=owning_folder)
                     if entry is None:
                         # file not in library
                         continue

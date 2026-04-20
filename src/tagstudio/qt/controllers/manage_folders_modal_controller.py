@@ -47,9 +47,7 @@ class ManageFoldersModal(ManageFoldersModalView):
 
         rows: list[tuple[Folder | None, str, object]] = []
         if self.lib.folder is not None:
-            rows.append(
-                (None, f"{self.lib.folder.path}  —  primary", _PRIMARY_ROLE)
-            )
+            rows.append((None, f"{self.lib.folder.path}  —  primary", _PRIMARY_ROLE))
 
         for folder in sorted(self.lib.folders, key=lambda f: f.path.as_posix()):
             if folder.path == primary_path:

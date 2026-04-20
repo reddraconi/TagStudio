@@ -44,12 +44,8 @@ def test_refresh_folders_scans_additional(library: Library, tmp_path: Path):
     tracker = RefreshTracker(library=library)
     list(tracker.refresh_folders(force_internal_tools=True))
 
-    primary_paths = {
-        p for f, p in tracker.files_not_in_library if f.path == primary_dir
-    }
-    extra_paths = {
-        p for f, p in tracker.files_not_in_library if f.id == extra_folder.id
-    }
+    primary_paths = {p for f, p in tracker.files_not_in_library if f.path == primary_dir}
+    extra_paths = {p for f, p in tracker.files_not_in_library if f.id == extra_folder.id}
     assert Path("primary_file.txt") in primary_paths
     assert Path("extra_file.txt") in extra_paths
     assert Path("extra_file.txt") not in primary_paths
@@ -72,9 +68,7 @@ def test_refresh_same_filename_in_two_folders(library: Library, tmp_path: Path):
     tracker = RefreshTracker(library=library)
     list(tracker.refresh_folders(force_internal_tools=True))
 
-    collisions = [
-        (f, p) for f, p in tracker.files_not_in_library if p == Path("collide.txt")
-    ]
+    collisions = [(f, p) for f, p in tracker.files_not_in_library if p == Path("collide.txt")]
     assert len(collisions) == 2
     folder_ids = {f.id for f, _ in collisions}
     assert extra_folder.id in folder_ids
@@ -158,9 +152,7 @@ def test_compiled_ignore_cleaned_up_on_scan_error(
     with pytest.raises(RuntimeError, match="scan blew up"):
         list(tracker.refresh_folders(force_internal_tools=False))
 
-    assert not compiled_path.exists(), (
-        "compiled_ignore temp file leaked when silent_run raised"
-    )
+    assert not compiled_path.exists(), "compiled_ignore temp file leaked when silent_run raised"
 
 
 @pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)

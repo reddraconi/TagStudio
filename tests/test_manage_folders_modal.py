@@ -89,9 +89,7 @@ def test_add_then_hide_triggers_exactly_one_scan(library: Library, tmp_path: Pat
 
     _trigger_hide(modal)
 
-    modal.driver.call_if_library_open.assert_called_once_with(
-        modal.driver.add_new_files_callback
-    )
+    modal.driver.call_if_library_open.assert_called_once_with(modal.driver.add_new_files_callback)
     assert modal._pending_scan is False
 
 
@@ -136,9 +134,11 @@ def test_remove_folder_callback_confirmed(library: Library, tmp_path: Path):
     folder = library.add_folder(target)
     folder_id = folder.id
     # Attach an entry so we exercise the cascade delete path.
-    library.add_entries([
-        Entry(path=Path("file.txt"), folder=folder, fields=[], date_added=dt.now()),
-    ])
+    library.add_entries(
+        [
+            Entry(path=Path("file.txt"), folder=folder, fields=[], date_added=dt.now()),
+        ]
+    )
     entries_before = library.entries_count
 
     modal = _make_controller(library)
@@ -156,7 +156,7 @@ def test_remove_folder_callback_confirmed(library: Library, tmp_path: Path):
     _, kwargs_path_count = modal._confirm_remove.call_args
     positional = modal._confirm_remove.call_args[0]
     assert positional[0] == target  # path
-    assert positional[1] == 1       # entry count
+    assert positional[1] == 1  # entry count
 
 
 def test_remove_folder_callback_primary_noop(library: Library):
@@ -189,8 +189,10 @@ def test_folder_entry_count_helper(library: Library, tmp_path: Path):
 
     assert library.folder_entry_count(folder) == 0
 
-    library.add_entries([
-        Entry(path=Path("a.txt"), folder=folder, fields=[], date_added=dt.now()),
-        Entry(path=Path("b.txt"), folder=folder, fields=[], date_added=dt.now()),
-    ])
+    library.add_entries(
+        [
+            Entry(path=Path("a.txt"), folder=folder, fields=[], date_added=dt.now()),
+            Entry(path=Path("b.txt"), folder=folder, fields=[], date_added=dt.now()),
+        ]
+    )
     assert library.folder_entry_count(folder) == 2

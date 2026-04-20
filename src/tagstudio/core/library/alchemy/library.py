@@ -843,9 +843,7 @@ class Library:
                 if table == "entries":
                     conn.execute(entries_copy_stmt)
                 else:
-                    conn.execute(
-                        text(f"INSERT INTO {new_name} SELECT * FROM {table}")
-                    )
+                    conn.execute(text(f"INSERT INTO {new_name} SELECT * FROM {table}"))
                 conn.execute(text(f"DROP TABLE {table}"))
                 conn.execute(text(f"ALTER TABLE {new_name} RENAME TO {table}"))
         except Exception as e:
@@ -1151,9 +1149,10 @@ class Library:
 
     def folder_entry_count(self, folder: Folder) -> int:
         with Session(self.engine) as session:
-            return session.scalar(
-                select(func.count(Entry.id)).where(Entry.folder_id == folder.id)
-            ) or 0
+            return (
+                session.scalar(select(func.count(Entry.id)).where(Entry.folder_id == folder.id))
+                or 0
+            )
 
     def folder_for_path(self, absolute: Path) -> Folder | None:
         """Return the registered Folder whose root is an ancestor of the given absolute path.
@@ -1200,13 +1199,9 @@ class Library:
             if resolved == existing_path:
                 raise ValueError(f"Folder already registered: {existing_path}")
             if resolved.is_relative_to(existing_path):
-                raise ValueError(
-                    f"Path is inside an already-registered folder: {existing_path}"
-                )
+                raise ValueError(f"Path is inside an already-registered folder: {existing_path}")
             if existing_path.is_relative_to(resolved):
-                raise ValueError(
-                    f"Path contains an already-registered folder: {existing_path}"
-                )
+                raise ValueError(f"Path contains an already-registered folder: {existing_path}")
 
         with Session(self.engine, expire_on_commit=False) as session:
             folder = Folder(path=resolved, uuid=str(uuid4()))
@@ -1242,8 +1237,7 @@ class Library:
             )
             if entry_count and not delete_entries:
                 raise ValueError(
-                    f"Folder has {entry_count} entries; "
-                    "pass delete_entries=True to remove them."
+                    f"Folder has {entry_count} entries; pass delete_entries=True to remove them."
                 )
             if entry_count:
                 session.query(Entry).where(Entry.folder_id == managed.id).delete()

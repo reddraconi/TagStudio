@@ -115,13 +115,15 @@ def test_relative_path_uses_entry_folder_not_library_dir(
 
     # Register the entry against the secondary folder so folder_for_path
     # resolves the filepath correctly.
-    library.add_entries([
-        Entry(
-            path=Path("nested/thing.png"),
-            folder=secondary_folder,
-            fields=[],
-        ),
-    ])
+    library.add_entries(
+        [
+            Entry(
+                path=Path("nested/thing.png"),
+                folder=secondary_folder,
+                fields=[],
+            ),
+        ]
+    )
 
     panel = PreviewPanel(library, qt_driver)
     qt_driver.settings.show_filepath = ShowFilepathOption.SHOW_RELATIVE_PATHS

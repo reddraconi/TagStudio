@@ -1679,11 +1679,7 @@ class ThumbRenderer(QObject):
 
             # Check if the file is supposed to be ignored and render an overlay if needed
             try:
-                if (
-                    image
-                    and Ignore.compiled_patterns
-                    and Ignore.compiled_patterns.match(filepath)
-                ):
+                if image and Ignore.compiled_patterns and Ignore.compiled_patterns.match(filepath):
                     image = render_ignored((adj_size, adj_size), pixel_ratio, image)
             except TypeError:
                 pass
