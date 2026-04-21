@@ -67,6 +67,7 @@ class TagBoxWidget(TagBoxWidgetView):
         for entry_id in self.__entries:
             self.__driver.lib.remove_tags_from_entries(entry_id, tag.id)
 
+        self.__driver._refresh_grouping_if_active()
         self.on_update.emit()
 
     @override

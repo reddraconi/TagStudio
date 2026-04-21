@@ -907,6 +907,49 @@ class Library:
                 tag_entries[tag_entry.tag_id].add(tag_entry.entry_id)
         return tag_entries
 
+    def get_tag_children(self, tag_ids: Iterable[int]) -> dict[int, list[Tag]]:
+        """Returns a dict of tag_id->(direct child Tags)."""
+        result: dict[int, list[Tag]] = {}
+        with Session(self.engine, expire_on_commit=False) as session:
+            statement = (
+                select(TagParent.parent_id, Tag)
+                .join(Tag, Tag.id == TagParent.child_id)
+                .where(TagParent.parent_id.in_(tag_ids))
+            )
+            for parent_id, child in session.execute(statement).all():
+                result.setdefault(parent_id, []).append(child)
+            session.expunge_all()
+        return result
+
+    def get_entries_tags(self, entry_ids: Iterable[int]) -> dict[int, list[Tag]]:
+        """Returns a dict of entry_id->(direct tags + all ancestor tags).
+
+        Mirrors tag search: a parent tag matches entries carrying any
+        descendant, so grouping by a parent tag surfaces those entries too.
+        """
+        base = (
+            select(
+                TagEntry.entry_id.label("entry_id"),
+                TagEntry.tag_id.label("ancestor_id"),
+            )
+            .where(TagEntry.entry_id.in_(entry_ids))
+            .cte("ancestor_tags", recursive=True)
+        )
+        recursive = select(
+            base.c.entry_id,
+            TagParent.parent_id.label("ancestor_id"),
+        ).join(base, base.c.ancestor_id == TagParent.child_id)
+        ancestors = base.union(recursive)
+
+        statement = select(ancestors.c.entry_id, Tag).join(Tag, Tag.id == ancestors.c.ancestor_id)
+
+        result: dict[int, list[Tag]] = {}
+        with Session(self.engine, expire_on_commit=False) as session:
+            for entry_id, tag in session.execute(statement).all():
+                result.setdefault(entry_id, []).append(tag)
+            session.expunge_all()
+        return result
+
     @property
     def entries_count(self) -> int:
         with Session(self.engine) as session:

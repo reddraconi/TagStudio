@@ -239,6 +239,7 @@ class FieldContainers(QWidget):
             tag_ids=tags,
         )
         self.driver.emit_badge_signals(tags, emit_on_absent=False)
+        self.driver._refresh_grouping_if_active()
 
     def write_container(self, index: int, field: BaseField, is_mixed: bool = False):
         """Update/Create data for a FieldContainer.

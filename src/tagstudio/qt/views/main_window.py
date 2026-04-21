@@ -46,6 +46,7 @@ from tagstudio.qt.mnemonics import assign_mnemonics
 from tagstudio.qt.models.palette import ColorType, get_tag_color
 from tagstudio.qt.platform_strings import trash_term
 from tagstudio.qt.resource_manager import ResourceManager
+from tagstudio.qt.tag_grouping import TAG_SORT_KEYS
 from tagstudio.qt.thumb_grid_layout import ThumbGridLayout
 from tagstudio.qt.translations import Translations
 
@@ -638,6 +639,8 @@ class MainWindow(QMainWindow):
         )
 
         ## Sorting Mode Dropdown
+        self.sort_by_label = QLabel(Translations["sorting.sort_by_label"])
+        self.extra_input_layout.addWidget(self.sort_by_label)
         self.sorting_mode_combobox = QComboBox(self.central_widget)
         self.sorting_mode_combobox.setObjectName("sorting_mode_combobox")
         for sort_mode in SortingModeEnum:
@@ -655,6 +658,35 @@ class MainWindow(QMainWindow):
         )
         self.sorting_direction_combobox.setCurrentIndex(1)  # Default: Descending
         self.extra_input_layout.addWidget(self.sorting_direction_combobox)
+
+        # Group-by dropdown. First entry disables grouping; rest come from TAG_SORT_KEYS.
+        self.group_by_label = QLabel(Translations["grouping.group_by_label"])
+        self.extra_input_layout.addWidget(self.group_by_label)
+        self.group_by_combobox = QComboBox(self.central_widget)
+        self.group_by_combobox.setObjectName("group_by_combobox")
+        self.group_by_combobox.addItem(Translations["grouping.none"], userData=None)
+        for key in TAG_SORT_KEYS:
+            self.group_by_combobox.addItem(Translations[key.label_translation_key], key.id)
+        self.extra_input_layout.addWidget(self.group_by_combobox)
+
+        self.tag_sort_direction_combobox = QComboBox(self.central_widget)
+        self.tag_sort_direction_combobox.setObjectName("tag_sort_direction_combobox")
+        self.tag_sort_direction_combobox.addItem(
+            Translations["sorting.direction.ascending"], userData=True
+        )
+        self.tag_sort_direction_combobox.addItem(
+            Translations["sorting.direction.descending"], userData=False
+        )
+        self.tag_sort_direction_combobox.setCurrentIndex(0)
+        self.tag_sort_direction_combobox.setEnabled(False)
+        self.extra_input_layout.addWidget(self.tag_sort_direction_combobox)
+
+        # Disable the direction control while grouping is off.
+        self.group_by_combobox.currentIndexChanged.connect(
+            lambda: self.tag_sort_direction_combobox.setEnabled(
+                self.group_by_combobox.currentData() is not None
+            )
+        )
 
         ## Thumbnail Size placeholder
         self.thumb_size_combobox = QComboBox(self.central_widget)
@@ -771,3 +803,18 @@ class MainWindow(QMainWindow):
     def show_hidden_entries(self) -> bool:
         """Whether to show entries tagged with hidden tags."""
         return self.show_hidden_entries_checkbox.isChecked()
+
+    @property
+    def group_by_tag(self) -> bool:
+        """Whether the grid should be sectioned by tag."""
+        return self.group_by_combobox.currentData() is not None
+
+    @property
+    def tag_sort_key_id(self) -> str | None:
+        """Id of the selected 'TagSortKey'; 'None' means grouping is off."""
+        return self.group_by_combobox.currentData()
+
+    @property
+    def tag_sort_direction(self) -> bool:
+        """Whether the tag groups are sorted ascending."""
+        return self.tag_sort_direction_combobox.currentData()

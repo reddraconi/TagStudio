@@ -85,6 +85,10 @@ class BrowsingState:
 
     show_hidden_entries: bool = False
 
+    group_by_tag: bool = False
+    tag_sort_key_id: str = "title"
+    tag_sort_ascending: bool = True
+
     query: str | None = None
 
     # Abstract Syntax Tree Of the current Search Query
@@ -152,6 +156,15 @@ class BrowsingState:
 
     def with_show_hidden_entries(self, show_hidden_entries: bool) -> "BrowsingState":
         return replace(self, show_hidden_entries=show_hidden_entries)
+
+    def with_group_by_tag(self, group_by_tag: bool) -> "BrowsingState":
+        return replace(self, group_by_tag=group_by_tag)
+
+    def with_tag_sort_key_id(self, tag_sort_key_id: str) -> "BrowsingState":
+        return replace(self, tag_sort_key_id=tag_sort_key_id)
+
+    def with_tag_sort_ascending(self, tag_sort_ascending: bool) -> "BrowsingState":
+        return replace(self, tag_sort_ascending=tag_sort_ascending)
 
 
 class FieldTypeEnum(enum.Enum):

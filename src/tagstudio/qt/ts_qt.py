@@ -18,6 +18,7 @@ import sys
 import time
 from argparse import Namespace
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
 from shutil import which
@@ -26,7 +27,7 @@ from warnings import catch_warnings
 
 import structlog
 from humanfriendly import format_size, format_timespan
-from PySide6.QtCore import QObject, QSettings, Qt, QThread, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QSettings, QSize, Qt, QThread, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -57,7 +58,7 @@ from tagstudio.core.library.alchemy.enums import (
 )
 from tagstudio.core.library.alchemy.fields import FieldID
 from tagstudio.core.library.alchemy.library import Library, LibraryStatus
-from tagstudio.core.library.alchemy.models import Entry
+from tagstudio.core.library.alchemy.models import Entry, Tag
 from tagstudio.core.library.ignore import Ignore
 from tagstudio.core.library.refresh import RefreshTracker
 from tagstudio.core.media_types import MediaCategories
@@ -95,6 +96,8 @@ from tagstudio.qt.models.palette import ColorType, UiColor, get_ui_color
 from tagstudio.qt.platform_strings import trash_term
 from tagstudio.qt.previews.vendored.ffmpeg import FFMPEG_CMD, FFPROBE_CMD
 from tagstudio.qt.resource_manager import ResourceManager
+from tagstudio.qt.tag_grouping import get_tag_sort_key, group_entries_by_tag
+from tagstudio.qt.thumb_grid_layout import GridEntry, GridHeader
 from tagstudio.qt.translations import Translations
 from tagstudio.qt.utils.custom_runnable import CustomRunnable
 from tagstudio.qt.utils.file_deleter import delete_file
@@ -172,6 +175,14 @@ class History(Generic[T]):
     @property
     def current(self) -> T:
         return self.__history[self.__index]
+
+
+@dataclass
+class _TagCarrier:
+    """Entry id + tag list, consumed by 'group_entries_by_tag'."""
+
+    entry_id: int
+    tags: list[Tag]
 
 
 class QtDriver(DriverMixin, QObject):
@@ -676,6 +687,21 @@ class QtDriver(DriverMixin, QObject):
             self.sorting_direction_callback
         )
 
+        # Group-by dropdown. Index 0 disables grouping; others carry a TagSortKey id.
+        current = self.browsing_history.current
+        selected_key = current.tag_sort_key_id if current.group_by_tag else None
+        group_by_index = self.main_window.group_by_combobox.findData(selected_key)
+        if group_by_index >= 0:
+            self.main_window.group_by_combobox.setCurrentIndex(group_by_index)
+        self.main_window.tag_sort_direction_combobox.setCurrentIndex(
+            0 if current.tag_sort_ascending else 1
+        )
+        self.main_window.tag_sort_direction_combobox.setEnabled(current.group_by_tag)
+        self.main_window.group_by_combobox.currentIndexChanged.connect(self.group_by_callback)
+        self.main_window.tag_sort_direction_combobox.currentIndexChanged.connect(
+            self.tag_sort_direction_callback
+        )
+
         # Thumbnail Size ComboBox
         self.main_window.thumb_size_combobox.setCurrentIndex(2)  # Default: Medium
         self.main_window.thumb_size_combobox.currentIndexChanged.connect(
@@ -899,6 +925,12 @@ class QtDriver(DriverMixin, QObject):
         self.main_window.thumb_layout.add_tags(selected, tag_ids)
         self.lib.add_tags_to_entries(selected, tag_ids)
         self.emit_badge_signals(tag_ids)
+        self._refresh_grouping_if_active()
+
+    def _refresh_grouping_if_active(self) -> None:
+        """Re-render the grid when a tag mutation could change the groups."""
+        if self.browsing_history.current.group_by_tag:
+            self.update_thumbs()
 
     def delete_files_callback(self, origin_path: str | Path, origin_id: int | None = None):
         """Callback to send on or more files to the system trash.
@@ -1178,6 +1210,21 @@ class QtDriver(DriverMixin, QObject):
             self.browsing_history.current.with_sorting_mode(self.main_window.sorting_mode)
         )
 
+    def group_by_callback(self):
+        key_id = self.main_window.tag_sort_key_id
+        enabled = key_id is not None
+        logger.info("Group By Changed", enabled=enabled, key_id=key_id)
+        new_state = self.browsing_history.current.with_group_by_tag(enabled)
+        # Selecting "(None)" keeps the last-used key so re-enabling restores it.
+        if key_id is not None:
+            new_state = new_state.with_tag_sort_key_id(key_id)
+        self.update_browsing_state(new_state)
+
+    def tag_sort_direction_callback(self):
+        ascending = self.main_window.tag_sort_direction
+        logger.info("Tag Sort Direction Changed", ascending=ascending)
+        self.update_browsing_state(self.browsing_history.current.with_tag_sort_ascending(ascending))
+
     def thumb_size_callback(self, size: int):
         """Perform actions needed when the thumbnail size selection is changed."""
         spacing_divisor: int = 10
@@ -1185,12 +1232,18 @@ class QtDriver(DriverMixin, QObject):
 
         self.update_thumbs()
         blank_icon: QIcon = QIcon()
+        new_side = self.main_window.thumb_size
+        new_size = QSize(new_side, new_side)
         for it in self.main_window.thumb_layout._item_thumbs:
             it.thumb_button.setIcon(blank_icon)
-            it.resize(self.main_window.thumb_size, self.main_window.thumb_size)
-            it.thumb_size = (self.main_window.thumb_size, self.main_window.thumb_size)
-            it.setFixedSize(self.main_window.thumb_size, self.main_window.thumb_size)
-            it.thumb_button.thumb_size = (self.main_window.thumb_size, self.main_window.thumb_size)
+            it.resize(new_side, new_side)
+            it.thumb_size = (new_side, new_side)
+            it.setFixedSize(new_side, new_side)
+            it.thumb_button.thumb_size = (new_side, new_side)
+            # thumb_container has no layout, so resizing ItemThumb does not
+            # cascade to thumb_button. Resize it directly.
+            it.thumb_button.setFixedSize(new_side, new_side)
+            it.thumb_button.setIconSize(new_size)
             it.set_filename_visibility(it.show_filename_label)
         self.main_window.thumb_layout.setSpacing(
             min(self.main_window.thumb_size // spacing_divisor, min_spacing)
@@ -1266,6 +1319,7 @@ class QtDriver(DriverMixin, QObject):
                 self.update_badges({BadgeType.FAVORITE: True}, origin_id=0, add_tags=False)
         else:
             self.main_window.preview_panel.set_selection(self.selected)
+        self._refresh_grouping_if_active()
 
     def toggle_item_selection(self, item_id: int, append: bool, bridge: bool):
         """Toggle the selection of an item in the Thumbnail Grid.
@@ -1411,9 +1465,36 @@ class QtDriver(DriverMixin, QObject):
         start = page * page_size
         end = min(start + page_size, len(self.frame_content))
 
-        self.main_window.thumb_layout.set_entries(self.frame_content[start:end])
+        page_entry_ids = self.frame_content[start:end]
+        state = self.browsing_history.current
+        if state.group_by_tag and page_entry_ids:
+            grid_items = self._build_grouped_grid_items(page_entry_ids, state)
+            self.main_window.thumb_layout.set_items(grid_items)
+        else:
+            self.main_window.thumb_layout.set_entries(page_entry_ids)
         self.main_window.thumb_layout.update()
         self.main_window.update()
+
+    def _build_grouped_grid_items(
+        self, entry_ids: list[int], state: "BrowsingState"
+    ) -> list[GridEntry | GridHeader]:
+        """Produce a GridHeader + GridEntry stream from a flat entry list."""
+        sort_key = get_tag_sort_key(state.tag_sort_key_id)
+        ascending = state.tag_sort_ascending
+        entry_tags = self.lib.get_entries_tags(entry_ids)
+        carriers = [_TagCarrier(entry_id=eid, tags=entry_tags.get(eid, [])) for eid in entry_ids]
+        groups = group_entries_by_tag(carriers, sort_key, ascending=ascending)
+        parent_tag_ids = [g.tag.id for g in groups if g.tag is not None]
+        children_map = self.lib.get_tag_children(parent_tag_ids) if parent_tag_ids else {}
+        items: list[GridEntry | GridHeader] = []
+        for group in groups:
+            children: tuple[Tag, ...] = ()
+            if group.tag is not None:
+                raw_children = children_map.get(group.tag.id, [])
+                children = tuple(sorted(raw_children, key=sort_key.key_fn, reverse=not ascending))
+            items.append(GridHeader(tag=group.tag, children=children))
+            items.extend(GridEntry(entry_id=c.entry_id) for c in group.entries)
+        return items
 
     def update_badges(self, badge_values: dict[BadgeType, bool], origin_id: int, add_tags=True):
         """Update the tag badges for item_thumbs.
@@ -1461,6 +1542,7 @@ class QtDriver(DriverMixin, QObject):
             else:
                 self.main_window.thumb_layout.remove_tags(entry_ids, tag_ids)
                 self.lib.remove_tags_from_entries(entry_ids, tag_ids)
+        self._refresh_grouping_if_active()
 
     def update_browsing_state(self, state: BrowsingState | None = None) -> None:
         """Navigates to a new BrowsingState when state is given, otherwise updates the results."""
