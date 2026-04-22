@@ -39,12 +39,17 @@ class TagGroup:
     entries: list[Any]
 
 
-def _hsl(hex_color: str) -> tuple[float, float, float]:
-    """Convert '#RRGGBB' to '(hue, saturation, lightness)' in [0.0, 1.0]."""
+def _hsl(hex_color: str) -> tuple[float, float, float] | None:
+    """Convert '#RRGGBB' to '(hue, saturation, lightness)' in [0.0, 1.0]. 'None' if malformed."""
     cleaned = hex_color.lstrip("#")
-    r = int(cleaned[0:2], 16) / 255.0
-    g = int(cleaned[2:4], 16) / 255.0
-    b = int(cleaned[4:6], 16) / 255.0
+    if len(cleaned) != 6:
+        return None
+    try:
+        r = int(cleaned[0:2], 16) / 255.0
+        g = int(cleaned[2:4], 16) / 255.0
+        b = int(cleaned[4:6], 16) / 255.0
+    except ValueError:
+        return None
     # colorsys returns HLS, not HSL.
     h, lightness, s = colorsys.rgb_to_hls(r, g, b)
     return h, s, lightness
@@ -54,16 +59,23 @@ def _color_sort_key(tag: Tag) -> tuple[float, ...]:
     """HSL of fill color, then border color as tiebreaker."""
     if tag.color is None:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    ph, ps, pl = _hsl(tag.color.primary)
-    if tag.color.secondary:
-        sh, ss, sl = _hsl(tag.color.secondary)
+    primary = _hsl(tag.color.primary)
+    if primary is None:
+        # Malformed primary: the always_trailing hook groups this with uncolored tags.
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    ph, ps, pl = primary
+    secondary = _hsl(tag.color.secondary) if tag.color.secondary else None
+    if secondary is not None:
+        sh, ss, sl = secondary
     else:
         sh = ss = sl = 0.0
     return (ph, ps, pl, sh, ss, sl)
 
 
 def _is_uncolored(tag: Tag) -> bool:
-    return tag.color is None
+    # Malformed primaries share the uncolored bucket so they don't sort ahead of
+    # real colors on an all-zero key.
+    return tag.color is None or _hsl(tag.color.primary) is None
 
 
 TAG_SORT_KEYS: list[TagSortKey] = [

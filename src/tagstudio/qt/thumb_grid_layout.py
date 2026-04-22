@@ -152,7 +152,7 @@ class ThumbGridLayout(QLayout):
         parent = self.parentWidget()
         for index, item in enumerate(self._grid_items):
             if isinstance(item, GridHeader):
-                header = TagGroupHeader(item.tag, list(item.children))
+                header = TagGroupHeader(item.tag, list(item.children), lib=self.driver.lib)
                 if parent is not None:
                     header.setParent(parent)
                     header.show()
@@ -237,8 +237,9 @@ class ThumbGridLayout(QLayout):
             if index < 0 or index >= len(self._item_thumbs):
                 continue
             item_thumb = self._item_thumbs[index]
-            if item_thumb.rendered_path == file_path:
-                continue
+            # Intentionally no rendered_path-match skip here: paths don't change when the
+            # thumb size does, so a path-only check would drop the fresh render and leave
+            # the widget stretching its previous-size pixmap until the user scrolls.
             item_thumb.update_thumb(image, file_path)
             item_thumb.update_size(size)
             item_thumb.set_filename_text(file_path)
@@ -351,8 +352,12 @@ class ThumbGridLayout(QLayout):
         row_end = row_start
         while row_end < total_rows and row_y[row_end] < offset + view_height:
             row_end += 1
-        # First entry, skipping a leading header.
-        for item in self._grid_items:
+        # First entry at or after the current scroll row, skipping any leading header.
+        # Drives page_positions so returning to this page restores the scroll anchor.
+        for grid_idx, (_col, row) in enumerate(positions):
+            if row < row_start:
+                continue
+            item = self._grid_items[grid_idx]
             if isinstance(item, GridEntry):
                 self.visible_changed.emit(item.entry_id)
                 break
@@ -462,8 +467,9 @@ class ThumbGridLayout(QLayout):
                     )
 
         # Set selection and badges after positioning to avoid first-frame flicker.
-        archived = self._tag_entries[TAG_ARCHIVED]
-        favorite = self._tag_entries[TAG_FAVORITE]
+        # _fetch_entries populates these keys; guard in case no entries are in view.
+        archived = self._tag_entries.setdefault(TAG_ARCHIVED, set())
+        favorite = self._tag_entries.setdefault(TAG_FAVORITE, set())
         selected = self.driver._selected
         for entry_id, thumb_indices in self._entry_items.items():
             is_selected = entry_id in selected

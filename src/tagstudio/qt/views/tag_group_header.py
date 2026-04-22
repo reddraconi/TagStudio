@@ -4,6 +4,8 @@
 
 """Full-width section header shown between groups of thumbnails in Group-by-Tag mode."""
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
@@ -17,14 +19,23 @@ from tagstudio.qt.mixed.tag_widget import (
 )
 from tagstudio.qt.translations import Translations
 
+if TYPE_CHECKING:
+    from tagstudio.core.library.alchemy.library import Library
+
 
 class TagGroupHeader(QWidget):
     """Row-wide header rendered above each tag group. 'tag' is 'None' for Untagged."""
 
-    def __init__(self, tag: Tag | None, children: list[Tag] | None = None) -> None:
+    def __init__(
+        self,
+        tag: Tag | None,
+        children: list[Tag] | None = None,
+        lib: "Library | None" = None,
+    ) -> None:
         super().__init__()
         self.tag = tag
         self.children_tags = list(children or [])
+        self.lib = lib
 
         # Class-scoped selector so the border doesn't cascade to QLabel children.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, on=True)
@@ -45,21 +56,28 @@ class TagGroupHeader(QWidget):
                 "QLabel{font-weight: 600;font-size: 13px;color: #888888;padding: 3px 8px;}"
             )
         else:
-            chip = QLabel(tag.name)
+            chip = QLabel(self._display_name(tag))
             chip.setStyleSheet(self._pill_style(tag))
 
+        # PlainText prevents QLabel from interpreting user-authored tag names as rich text.
+        chip.setTextFormat(Qt.TextFormat.PlainText)
         chip.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(chip)
 
         for child in self.children_tags:
-            child_chip = QLabel(child.name)
+            child_chip = QLabel(self._display_name(child))
             child_chip.setStyleSheet(self._pill_style(child))
+            child_chip.setTextFormat(Qt.TextFormat.PlainText)
             child_chip.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             layout.addWidget(child_chip)
 
         layout.addStretch(1)
 
         self.chip = chip
+
+    def _display_name(self, tag: Tag) -> str:
+        """Honor the library's disambiguation logic when a Library is available."""
+        return self.lib.tag_display_name(tag) if self.lib else tag.name
 
     @staticmethod
     def _pill_style(tag: Tag) -> str:

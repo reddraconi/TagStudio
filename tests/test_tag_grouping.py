@@ -222,6 +222,18 @@ def test_color_sort_uses_secondary_as_tiebreaker_on_equal_primary():
     assert [g.tag.name for g in groups] == ["A", "B"]
 
 
+@pytest.mark.parametrize("bad_primary", ["", "#", "#xyz", "not-a-color", "#12345"])
+def test_color_sort_groups_malformed_colors_with_uncolored(bad_primary: str):
+    red = _tag("Red", primary="#ff0000")
+    broken = _tag("Broken", primary=bad_primary)
+    entries = [_FakeEntry(1, tags={red}), _FakeEntry(2, tags={broken})]
+
+    # Malformed colors must not crash the sort and must trail behind real colors.
+    groups = group_entries_by_tag(entries, _sort_by_color(), ascending=True)
+
+    assert [g.tag.name for g in groups] == ["Red", "Broken"]
+
+
 # --- Extensibility -----------------------------------------------------------
 
 
