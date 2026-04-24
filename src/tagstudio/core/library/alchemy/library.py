@@ -228,6 +228,16 @@ class Library:
         self.ignored_entries_count: int = -1
         self.unlinked_entries_count: int = -1
 
+        # Bumped on any tag/tag-parent/tag-entry mutation. Lets grouped-view
+        # consumers cheaply invalidate cached ancestry lookups.
+        self._tag_graph_version: int = 0
+        self._entries_tags_cache: (
+            tuple[tuple[int, tuple[int, ...]], dict[int, list[Tag]]] | None
+        ) = None
+        self._tag_children_cache: (
+            tuple[tuple[int, tuple[int, ...]], dict[int, list[Tag]]] | None
+        ) = None
+
     def close(self):
         if self.engine:
             self.engine.dispose()
@@ -240,6 +250,9 @@ class Library:
         self.dupe_files_count = -1
         self.ignored_entries_count = -1
         self.unlinked_entries_count = -1
+
+        self._entries_tags_cache = None
+        self._tag_children_cache = None
 
     def migrate_json_to_sqlite(self, json_lib: JsonLibrary):
         """Migrate JSON library data to the SQLite database."""
@@ -909,16 +922,22 @@ class Library:
 
     def get_tag_children(self, tag_ids: Iterable[int]) -> dict[int, list[Tag]]:
         """Returns a dict of tag_id->(direct child Tags)."""
+        key_ids = tuple(sorted(set(tag_ids)))
+        cache_key = (self._tag_graph_version, key_ids)
+        if self._tag_children_cache is not None and self._tag_children_cache[0] == cache_key:
+            return self._tag_children_cache[1]
+
         result: dict[int, list[Tag]] = {}
         with Session(self.engine, expire_on_commit=False) as session:
             statement = (
                 select(TagParent.parent_id, Tag)
                 .join(Tag, Tag.id == TagParent.child_id)
-                .where(TagParent.parent_id.in_(tag_ids))
+                .where(TagParent.parent_id.in_(key_ids))
             )
             for parent_id, child in session.execute(statement).all():
                 result.setdefault(parent_id, []).append(child)
             session.expunge_all()
+        self._tag_children_cache = (cache_key, result)
         return result
 
     def get_entries_tags(self, entry_ids: Iterable[int]) -> dict[int, list[Tag]]:
@@ -927,12 +946,17 @@ class Library:
         Mirrors tag search: a parent tag matches entries carrying any
         descendant, so grouping by a parent tag surfaces those entries too.
         """
+        key_ids = tuple(sorted(set(entry_ids)))
+        cache_key = (self._tag_graph_version, key_ids)
+        if self._entries_tags_cache is not None and self._entries_tags_cache[0] == cache_key:
+            return self._entries_tags_cache[1]
+
         base = (
             select(
                 TagEntry.entry_id.label("entry_id"),
                 TagEntry.tag_id.label("ancestor_id"),
             )
-            .where(TagEntry.entry_id.in_(entry_ids))
+            .where(TagEntry.entry_id.in_(key_ids))
             .cte("ancestor_tags", recursive=True)
         )
         recursive = select(
@@ -948,6 +972,7 @@ class Library:
             for entry_id, tag in session.execute(statement).all():
                 result.setdefault(entry_id, []).append(tag)
             session.expunge_all()
+        self._entries_tags_cache = (cache_key, result)
         return result
 
     @property
@@ -1043,6 +1068,7 @@ class Library:
             ]:
                 session.query(Entry).where(Entry.id.in_(sub_list)).delete()
             session.commit()
+        self._tag_graph_version += 1
 
     def has_path_entry(self, path: Path) -> bool:
         """Check if item with given path is in library already."""
@@ -1235,6 +1261,7 @@ class Library:
                 logger.error(e)
                 session.rollback()
                 return False
+        self._tag_graph_version += 1
         return True
 
     def update_field_position(
@@ -1547,6 +1574,8 @@ class Library:
                     except IntegrityError:
                         session.rollback()
 
+        if total_added:
+            self._tag_graph_version += 1
         return total_added
 
     def remove_tags_from_entries(
@@ -1571,6 +1600,7 @@ class Library:
                             session.delete(tag_entry)
                             session.flush()
                 session.commit()
+                self._tag_graph_version += 1
                 return True
             except IntegrityError as e:
                 logger.error(e)
@@ -1736,6 +1766,7 @@ class Library:
             try:
                 session.add(parent_tag)
                 session.commit()
+                self._tag_graph_version += 1
                 return True
             except IntegrityError:
                 session.rollback()
@@ -1769,6 +1800,7 @@ class Library:
             session.delete(remove)
             session.commit()
 
+        self._tag_graph_version += 1
         return True
 
     def update_tag(

@@ -101,6 +101,20 @@ def get_tag_sort_key(key_id: str) -> TagSortKey:
     return TAG_SORT_KEYS[0]
 
 
+def sort_tags(
+    tags: Iterable[Tag],
+    sort_key: TagSortKey,
+    ascending: bool = True,
+) -> list[Tag]:
+    """Sort tags by 'sort_key', keeping 'always_trailing' tags after the rest."""
+    trailing_predicate = sort_key.always_trailing or (lambda _t: False)
+    primary = [t for t in tags if not trailing_predicate(t)]
+    trailing = [t for t in tags if trailing_predicate(t)]
+    primary.sort(key=sort_key.key_fn, reverse=not ascending)
+    trailing.sort(key=sort_key.key_fn, reverse=not ascending)
+    return primary + trailing
+
+
 def group_entries_by_tag(
     entries: Iterable[Any],
     sort_key: TagSortKey,
@@ -117,15 +131,10 @@ def group_entries_by_tag(
         for tag in entry.tags:
             tag_to_entries.setdefault(tag, []).append(entry)
 
-    trailing_predicate = sort_key.always_trailing or (lambda _t: False)
-    primary = [t for t in tag_to_entries if not trailing_predicate(t)]
-    trailing = [t for t in tag_to_entries if trailing_predicate(t)]
-
-    primary.sort(key=sort_key.key_fn, reverse=not ascending)
-    trailing.sort(key=sort_key.key_fn, reverse=not ascending)
-
-    groups: list[TagGroup] = [TagGroup(tag=t, entries=tag_to_entries[t]) for t in primary]
-    groups.extend(TagGroup(tag=t, entries=tag_to_entries[t]) for t in trailing)
+    groups: list[TagGroup] = [
+        TagGroup(tag=t, entries=tag_to_entries[t])
+        for t in sort_tags(tag_to_entries, sort_key, ascending=ascending)
+    ]
     if untagged:
         groups.append(TagGroup(tag=None, entries=untagged))
     return groups

@@ -14,6 +14,7 @@ from tagstudio.qt.tag_grouping import (
     TagSortKey,
     get_tag_sort_key,
     group_entries_by_tag,
+    sort_tags,
 )
 
 
@@ -258,3 +259,29 @@ def test_tag_group_is_frozen():
     g = TagGroup(tag=_tag("Alpha"), entries=[])
     with pytest.raises(AttributeError):
         g.tag = None  # type: ignore[misc]
+
+
+# --- sort_tags helper --------------------------------------------------------
+
+
+def test_sort_tags_honors_always_trailing_rule():
+    red = _tag("Red", primary="#ff0000")
+    blue = _tag("Blue", primary="#0000ff")
+    uncolored = _tag("Zebra")
+
+    # Uncolored must trail regardless of direction.
+    ascending = sort_tags([uncolored, red, blue], _sort_by_color(), ascending=True)
+    descending = sort_tags([uncolored, red, blue], _sort_by_color(), ascending=False)
+
+    assert [t.name for t in ascending] == ["Red", "Blue", "Zebra"]
+    assert [t.name for t in descending] == ["Blue", "Red", "Zebra"]
+
+
+def test_sort_tags_without_always_trailing_sorts_everything():
+    a = _tag("alpha")
+    b = _tag("Beta")
+    c = _tag("GAMMA")
+
+    ordered = sort_tags([c, a, b], _sort_by_title(), ascending=True)
+
+    assert [t.name for t in ordered] == ["alpha", "Beta", "GAMMA"]

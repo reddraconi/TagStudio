@@ -96,7 +96,7 @@ from tagstudio.qt.models.palette import ColorType, UiColor, get_ui_color
 from tagstudio.qt.platform_strings import trash_term
 from tagstudio.qt.previews.vendored.ffmpeg import FFMPEG_CMD, FFPROBE_CMD
 from tagstudio.qt.resource_manager import ResourceManager
-from tagstudio.qt.tag_grouping import get_tag_sort_key, group_entries_by_tag
+from tagstudio.qt.tag_grouping import get_tag_sort_key, group_entries_by_tag, sort_tags
 from tagstudio.qt.thumb_grid_layout import GridEntry, GridHeader
 from tagstudio.qt.translations import Translations
 from tagstudio.qt.utils.custom_runnable import CustomRunnable
@@ -1491,7 +1491,7 @@ class QtDriver(DriverMixin, QObject):
             children: tuple[Tag, ...] = ()
             if group.tag is not None:
                 raw_children = children_map.get(group.tag.id, [])
-                children = tuple(sorted(raw_children, key=sort_key.key_fn, reverse=not ascending))
+                children = tuple(sort_tags(raw_children, sort_key, ascending=ascending))
             items.append(GridHeader(tag=group.tag, children=children))
             items.extend(GridEntry(entry_id=c.entry_id) for c in group.entries)
         return items
