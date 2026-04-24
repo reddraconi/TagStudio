@@ -289,13 +289,13 @@ class TagWidget(QWidget):
 
 
 def get_primary_color(tag: Tag) -> QColor:
-    primary_color = QColor(
-        get_tag_color(ColorType.PRIMARY, TagColorEnum.DEFAULT)
-        if not tag.color
-        else tag.color.primary
-    )
-
-    return primary_color
+    default = QColor(get_tag_color(ColorType.PRIMARY, TagColorEnum.DEFAULT))
+    if not tag.color:
+        return default
+    # Malformed primary strings (empty, bad hex) produce an invalid QColor whose
+    # toTuple() raises SystemError downstream; fall back rather than crash the render.
+    candidate = QColor(tag.color.primary)
+    return candidate if candidate.isValid() else default
 
 
 def get_border_color(primary_color: QColor) -> QColor:

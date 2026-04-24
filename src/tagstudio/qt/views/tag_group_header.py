@@ -83,19 +83,19 @@ class TagGroupHeader(QWidget):
     def _pill_style(tag: Tag) -> str:
         """Stylesheet mirroring TagWidget's fill/border/text derivation."""
         primary = get_primary_color(tag)
+        # Ignore malformed secondary strings so toTuple() can't raise later.
+        secondary: QColor | None = None
+        if tag.color and tag.color.secondary:
+            candidate = QColor(tag.color.secondary)
+            if candidate.isValid():
+                secondary = candidate
         border = (
-            get_border_color(primary)
-            if not (tag.color and tag.color.secondary and tag.color.color_border)
-            else QColor(tag.color.secondary)
+            secondary
+            if secondary is not None and tag.color and tag.color.color_border
+            else get_border_color(primary)
         )
-        highlight = get_highlight_color(
-            primary if not (tag.color and tag.color.secondary) else QColor(tag.color.secondary)
-        )
-        text = (
-            QColor(tag.color.secondary)
-            if tag.color and tag.color.secondary
-            else get_text_color(primary, highlight)
-        )
+        highlight = get_highlight_color(secondary if secondary is not None else primary)
+        text = secondary if secondary is not None else get_text_color(primary, highlight)
         return (
             "QLabel{"
             f"background: rgba{primary.toTuple()};"
