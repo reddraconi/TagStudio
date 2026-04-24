@@ -23,7 +23,8 @@ if TYPE_CHECKING:
     from tagstudio.qt.ts_qt import QtDriver
 
 logger = structlog.get_logger(__name__)
-Image.MAX_IMAGE_PIXELS = None
+# Pillow's pixel ceiling is applied at runtime by the driver via
+# apply_pillow_pixel_limit(); see tagstudio.qt.previews.renderer.
 
 
 class PreviewThumb(PreviewThumbView):

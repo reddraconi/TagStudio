@@ -1,7 +1,7 @@
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import defusedxml.ElementTree as ET  # noqa: N817  hardened against XXE / billion-laughs
 import structlog
 
 from tagstudio.core.library.alchemy.library import Library

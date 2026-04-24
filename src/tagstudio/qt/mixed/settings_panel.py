@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,18 +15,22 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from tagstudio.core.enums import ShowFilepathOption, TagClickActionOption
 from tagstudio.qt.global_settings import (
+    DEFAULT_MAX_IMAGE_MEGAPIXELS,
     DEFAULT_THUMB_CACHE_SIZE,
     MIN_THUMB_CACHE_SIZE,
     Splash,
     Theme,
 )
+from tagstudio.qt.previews.renderer import apply_pillow_pixel_limit
 from tagstudio.qt.translations import DEFAULT_TRANSLATION, LANGUAGES, Translations
 from tagstudio.qt.views.panel_modal import PanelModal, PanelWidget
 
@@ -171,6 +175,36 @@ class SettingsPanel(PanelWidget):
             Translations["settings.thumb_cache_size.label"], self.thumb_cache_size_container
         )
 
+        # Max Image Megapixels (decompression-bomb guard)
+        self.max_image_mp_container = QWidget()
+        self.max_image_mp_layout = QHBoxLayout(self.max_image_mp_container)
+        self.max_image_mp_layout.setContentsMargins(0, 0, 0, 0)
+        self.max_image_mp_layout.setSpacing(6)
+        self.max_image_mp = QLineEdit()
+        self.max_image_mp.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.max_image_mp.setValidator(QIntValidator(0, 2000))
+        self.max_image_mp.setText(str(self.driver.settings.max_image_megapixels))
+        self.max_image_mp_layout.addWidget(self.max_image_mp)
+        self.max_image_mp_layout.setStretch(1, 2)
+        self.max_image_mp_layout.addWidget(QLabel("MP"))
+        self.max_image_mp_help = QToolButton()
+        self.max_image_mp_help.setText("?")
+        self.max_image_mp_help.setAutoRaise(True)
+        self.max_image_mp_help.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self.max_image_mp_help.setToolTip(Translations["settings.max_image_megapixels.help"])
+        # Also show on click so touch / click-to-dismiss users see the text.
+        self.max_image_mp_help.clicked.connect(
+            lambda: QMessageBox.information(
+                self,
+                Translations["settings.max_image_megapixels.label"],
+                Translations["settings.max_image_megapixels.help"],
+            )
+        )
+        self.max_image_mp_layout.addWidget(self.max_image_mp_help)
+        form_layout.addRow(
+            Translations["settings.max_image_megapixels.label"], self.max_image_mp_container
+        )
+
         # Autoplay
         self.autoplay_checkbox = QCheckBox()
         self.autoplay_checkbox.setChecked(self.driver.settings.autoplay)
@@ -286,6 +320,10 @@ class SettingsPanel(PanelWidget):
         return list(LANGUAGES.values())[self.language_combobox.currentIndex()]
 
     def get_settings(self) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
+        try:
+            max_image_megapixels = int(self.max_image_mp.text())
+        except ValueError:
+            max_image_megapixels = DEFAULT_MAX_IMAGE_MEGAPIXELS
         return {
             "language": self.__get_language(),
             "open_last_loaded_on_startup": self.open_last_lib_checkbox.isChecked(),
@@ -294,6 +332,7 @@ class SettingsPanel(PanelWidget):
                 float(self.thumb_cache_size.text()) or DEFAULT_THUMB_CACHE_SIZE,
                 MIN_THUMB_CACHE_SIZE,
             ),
+            "max_image_megapixels": max_image_megapixels,
             "autoplay": self.autoplay_checkbox.isChecked(),
             "show_filenames_in_grid": self.show_filenames_checkbox.isChecked(),
             "page_size": int(self.page_size_line_edit.text()),
@@ -310,11 +349,27 @@ class SettingsPanel(PanelWidget):
     def update_settings(self, driver: "QtDriver"):
         settings = self.get_settings()
 
+        new_max_mp = settings["max_image_megapixels"]
+        if new_max_mp == 0 and driver.settings.max_image_megapixels != 0:
+            confirm = QMessageBox(
+                QMessageBox.Icon.Warning,
+                Translations["settings.max_image_megapixels.confirm_title"],
+                Translations["settings.max_image_megapixels.confirm_body"],
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                self,
+            )
+            confirm.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            if confirm.exec() != QMessageBox.StandardButton.Yes:
+                # Revert the user's choice and keep the previous value.
+                settings["max_image_megapixels"] = driver.settings.max_image_megapixels
+                self.max_image_mp.setText(str(driver.settings.max_image_megapixels))
+
         driver.settings.language = settings["language"]
         driver.settings.open_last_loaded_on_startup = settings["open_last_loaded_on_startup"]
         driver.settings.autoplay = settings["autoplay"]
         driver.settings.generate_thumbs = settings["generate_thumbs"]
         driver.settings.thumb_cache_size = settings["thumb_cache_size"]
+        driver.settings.max_image_megapixels = settings["max_image_megapixels"]
         driver.settings.show_filenames_in_grid = settings["show_filenames_in_grid"]
         driver.settings.page_size = settings["page_size"]
         driver.settings.infinite_scroll = settings["infinite_scroll"]
@@ -327,6 +382,7 @@ class SettingsPanel(PanelWidget):
         driver.settings.splash = settings["splash"]
 
         driver.settings.save()
+        apply_pillow_pixel_limit(driver.settings.max_image_megapixels)
 
         # Apply changes
         # Show File Path

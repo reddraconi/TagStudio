@@ -11,7 +11,6 @@ import os
 import sqlite3
 import struct
 import tarfile
-import xml.etree.ElementTree as ET
 import zipfile
 import zlib
 from copy import deepcopy
@@ -22,6 +21,7 @@ from warnings import catch_warnings
 from xml.etree.ElementTree import Element
 
 import cv2
+import defusedxml.ElementTree as ET  # noqa: N817  hardened against XXE / billion-laughs
 import numpy as np
 import py7zr
 import py7zr.io
@@ -89,8 +89,21 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 logger = structlog.get_logger(__name__)
-Image.MAX_IMAGE_PIXELS = None
+# Pillow's pixel ceiling is applied at runtime from GlobalSettings via
+# apply_pillow_pixel_limit(); the default here leaves Pillow's built-in
+# 89M-pixel guard in place until the driver applies the user's setting.
 register_heif_opener()
+
+
+def apply_pillow_pixel_limit(max_megapixels: int) -> None:
+    """Apply the configured Pillow decompression-bomb ceiling.
+
+    'max_megapixels' is the user-facing setting (1 MP == 1_000_000 px).
+    A value of 0 disables the guard -- intentionally exposed to users who
+    open trusted, very large images, but it also removes protection
+    against crafted images that would otherwise be rejected.
+    """
+    Image.MAX_IMAGE_PIXELS = None if max_megapixels == 0 else max_megapixels * 1_000_000
 
 try:
     import pillow_jxl  # noqa: F401 # pyright: ignore[reportUnusedImport]

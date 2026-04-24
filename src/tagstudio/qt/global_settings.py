@@ -28,6 +28,11 @@ MIN_THUMB_CACHE_SIZE = 10  # Number in MiB
 DEFAULT_CACHED_IMAGE_QUALITY = 80
 DEFAULT_CACHED_IMAGE_RES = 256
 
+# Pillow's decompression-bomb guard. 100 megapixels covers virtually all
+# real photos while still aborting a crafted giant image before it
+# allocates gigabytes. 0 (user-selectable) turns the guard off entirely.
+DEFAULT_MAX_IMAGE_MEGAPIXELS = 100
+
 
 class Theme(IntEnum):
     DARK = 0
@@ -72,6 +77,7 @@ class GlobalSettings(BaseModel):
     theme: Theme = Field(default=Theme.SYSTEM)
     splash: Splash = Field(default=Splash.DEFAULT)
     windows_start_command: bool = Field(default=False)
+    max_image_megapixels: int = Field(default=DEFAULT_MAX_IMAGE_MEGAPIXELS)
 
     date_format: str = Field(default="%x")
     hour_format: bool = Field(default=True)

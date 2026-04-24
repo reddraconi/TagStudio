@@ -94,6 +94,7 @@ from tagstudio.qt.mixed.tag_database import TagDatabasePanel
 from tagstudio.qt.mixed.tag_search import TagSearchModal
 from tagstudio.qt.models.palette import ColorType, UiColor, get_ui_color
 from tagstudio.qt.platform_strings import trash_term
+from tagstudio.qt.previews.renderer import apply_pillow_pixel_limit
 from tagstudio.qt.previews.vendored.ffmpeg import FFMPEG_CMD, FFPROBE_CMD
 from tagstudio.qt.resource_manager import ResourceManager
 from tagstudio.qt.tag_grouping import get_tag_sort_key, group_entries_by_tag, sort_tags
@@ -245,6 +246,7 @@ class QtDriver(DriverMixin, QObject):
                 "[Settings] Global Settings File does not exist creating",
                 path=self.global_settings_path,
             )
+        apply_pillow_pixel_limit(self.settings.max_image_megapixels)
         self.applied_theme = self.settings.theme
 
         self.__reset_navigation()

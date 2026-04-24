@@ -13,7 +13,7 @@ from pathlib import Path
 import time
 import traceback
 from typing import Generator, cast
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET  # hardened against billion-laughs / XXE
 
 import structlog
 from typing_extensions import Self
