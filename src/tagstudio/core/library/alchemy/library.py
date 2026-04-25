@@ -754,7 +754,7 @@ class Library:
 
         # Copy extensions to '.ts_ignore' file
         if ts_ignore.exists():
-            with open(ts_ignore, "a") as f:
+            with open(ts_ignore, "a", encoding="utf-8") as f:
                 prefix = ""
                 if not is_exclude_list:
                     prefix = "!"

@@ -82,7 +82,11 @@ class GlobalSettings(BaseModel):
     @staticmethod
     def read_settings(path: Path = DEFAULT_GLOBAL_SETTINGS_PATH) -> "GlobalSettings":
         if path.exists():
-            with open(path) as file:
+            # `errors="replace"` lets a legacy settings file written under a non-UTF-8
+            # Windows ANSI codepage still load: any undecodable bytes become U+FFFD instead
+            # of raising and blocking app startup. The next save() rewrites the file as
+            # strict UTF-8, so the fallback is self-healing.
+            with open(path, encoding="utf-8", errors="replace") as file:
                 filecontents = file.read()
                 if len(filecontents.strip()) != 0:
                     logger.info("[Settings] Reading Global Settings File", path=path)
@@ -98,7 +102,7 @@ class GlobalSettings(BaseModel):
         if not path.parent.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             toml.dump(self.model_dump(), f, encoder=TomlEnumEncoder())
 
     @property
